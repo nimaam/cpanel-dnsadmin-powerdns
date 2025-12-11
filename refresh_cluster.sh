@@ -7,11 +7,19 @@ echo ""
 
 # 1. Clear cPanel cache
 echo "1. Clearing cPanel cache..."
+CACHE_SCRIPT=""
 if [ -f "/usr/local/cpanel/scripts/update_cpanel_cache" ]; then
-    /usr/local/cpanel/scripts/update_cpanel_cache
+    CACHE_SCRIPT="/usr/local/cpanel/scripts/update_cpanel_cache"
+elif [ -f "/scripts/update_cpanel_cache" ]; then
+    CACHE_SCRIPT="/scripts/update_cpanel_cache"
+fi
+
+if [ -n "$CACHE_SCRIPT" ]; then
+    $CACHE_SCRIPT
     echo "   ✅ Cache cleared"
 else
-    echo "   ⚠️  Cache script not found"
+    echo "   ⚠️  Cache script not found (this is OK, cache may clear automatically)"
+    echo "   You can manually clear cache by removing: /var/cpanel/cpanel_cache/*"
 fi
 
 echo ""
