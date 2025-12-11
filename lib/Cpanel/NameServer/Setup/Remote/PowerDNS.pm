@@ -1,7 +1,6 @@
 package Cpanel::NameServer::Setup::Remote::PowerDNS;
 
 use strict;
-use Cpanel::HTTP::Client ();
 use Cpanel::FileUtils::Copy ();
 use Cpanel::JSON ();
 use Whostmgr::ACLS ();
@@ -52,6 +51,8 @@ sub setup {
     }
 
     # Test API connection before saving configuration
+    # Load HTTP::Client only when needed (lazy loading)
+    require Cpanel::HTTP::Client;
     my $test_url = "$base_url/servers/localhost";
     my $ua = Cpanel::HTTP::Client->new(
         timeout    => 10,
