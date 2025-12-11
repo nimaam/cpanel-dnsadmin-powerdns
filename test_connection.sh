@@ -3,8 +3,8 @@
 # Test PowerDNS API connection script
 # This helps diagnose connection issues
 
-API_URL="${1:-http://159.100.6.2:8081/api/v1}"
-API_KEY="${2:-gPJJ4FdWvz4ngNvx}"
+API_URL="${1}"
+API_KEY="${2}"
 
 echo "=== PowerDNS API Connection Test ==="
 echo ""
