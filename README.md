@@ -138,9 +138,65 @@ After installation, test the integration:
 
 ### Module Not Appearing in Backend Type Menu
 
-- Verify files are in correct locations with correct permissions
-- Check file syntax: `perl -c /usr/local/cpanel/Cpanel/NameServer/Setup/Remote/PowerDNS.pm`
-- Review cPanel error logs: `/usr/local/cpanel/logs/error_log`
+**Important:** The syntax check error you see with system Perl is **normal and expected**. cPanel uses its own Perl interpreter with different module paths. The module will work when loaded by cPanel's Perl.
+
+**Troubleshooting Steps:**
+
+1. **Verify file locations and permissions:**
+   ```bash
+   ls -lh /usr/local/cpanel/Cpanel/NameServer/Setup/Remote/PowerDNS.pm
+   ls -lh /usr/local/cpanel/Cpanel/NameServer/Remote/PowerDNS.pm
+   ```
+   Both files should exist and have permissions `644`.
+
+2. **Fix permissions if needed:**
+   ```bash
+   chmod 644 /usr/local/cpanel/Cpanel/NameServer/Setup/Remote/PowerDNS.pm
+   chmod 644 /usr/local/cpanel/Cpanel/NameServer/Remote/PowerDNS.pm
+   ```
+
+3. **Clear cPanel cache:**
+   ```bash
+   /usr/local/cpanel/scripts/update_cpanel_cache
+   ```
+
+4. **Restart cPanel service:**
+   ```bash
+   /scripts/restartsrv_cpsrvd
+   ```
+
+5. **Verify dnsadmin is NOT dormant:**
+   - Go to: `WHM >> Server Configuration >> Tweak Settings`
+   - Find "Dormant services" section
+   - Ensure "dnsadmin" is **unchecked**
+   - Click "Save"
+
+6. **Check cPanel error logs:**
+   ```bash
+   tail -f /usr/local/cpanel/logs/error_log
+   ```
+   Then try accessing: `WHM >> Clusters >> DNS Cluster >> Add a DNS Server`
+   Look for any PowerDNS-related errors.
+
+7. **Test module loading with cPanel Perl:**
+   ```bash
+   /usr/local/cpanel/3rdparty/bin/perl -I/usr/local/cpanel/Cpanel -I/usr/local/cpanel -e 'use Cpanel::NameServer::Setup::Remote::PowerDNS; print "OK\n";'
+   ```
+   If this works, the module is loadable by cPanel.
+
+8. **Check for other backend modules (for comparison):**
+   ```bash
+   ls -la /usr/local/cpanel/Cpanel/NameServer/Setup/Remote/
+   ```
+   Compare permissions and structure with other working modules.
+
+9. **Clear browser cache** and try accessing the DNS Cluster page again.
+
+10. **Run the verification script:**
+    ```bash
+    chmod +x verify_installation.sh
+    ./verify_installation.sh
+    ```
 
 ### API Connection Issues
 
