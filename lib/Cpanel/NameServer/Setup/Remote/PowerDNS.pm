@@ -73,23 +73,40 @@ sub setup {
 
     # Test API connection before saving configuration
     my $test_url = "$base_url/servers/localhost";
-    my $ua = LWP::UserAgent->new("timeout" => 10, "agent" => "cPanel-dnsadmin-PowerDNS/1.0");
-    my $request = HTTP::Request->new("GET" => $test_url);
-    $request->header("X-API-Key" => $api_key);
-    $request->header("Content-Type" => "application/json");
+    my $connection_error = "";
+    eval {
+        my $ua = LWP::UserAgent->new(
+            "timeout" => 10,
+            "agent" => "cPanel-dnsadmin-PowerDNS/1.0",
+            "ssl_opts" => { "verify_hostname" => 0 },  # Allow self-signed certs
+        );
+        my $request = HTTP::Request->new("GET" => $test_url);
+        $request->header("X-API-Key" => $api_key);
+        $request->header("Content-Type" => "application/json");
 
-    my $response = $ua->request($request);
-    if (!$response->is_success) {
-        my $error_msg = "Failed to connect to PowerDNS API: " . $response->code() . " - " . $response->message();
-        if ($response->content()) {
-            eval {
-                my $error_data = JSON::decode_json($response->content());
-                if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
-                    $error_msg .= " - " . $error_data->{"error"};
-                }
-            };
+        my $response = $ua->request($request);
+        if (!$response->is_success) {
+            my $error_msg = "Failed to connect to PowerDNS API: " . $response->code() . " - " . $response->message();
+            if ($response->content()) {
+                eval {
+                    my $error_data = JSON::decode_json($response->content());
+                    if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
+                        $error_msg .= " - " . $error_data->{"error"};
+                    }
+                };
+            }
+            $connection_error = $error_msg;
         }
-        return (0, $error_msg);
+    };
+    if ($@) {
+        # Connection test failed with exception - might be network issue or LWP problem
+        my $error_detail = $@;
+        $error_detail =~ s/ at .*$//;  # Remove file/line info
+        $connection_error = "Failed to test PowerDNS API connection: $error_detail";
+    }
+    
+    if ($connection_error) {
+        return (0, $connection_error);
     }
 
     # Create the config directory if it doesn't exist
