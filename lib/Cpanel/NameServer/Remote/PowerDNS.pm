@@ -202,7 +202,7 @@ sub _cpanel_to_powerdns_zone {
                     "records" => [
                         {
                             "content" => $content,
-                            "disabled" => JSON::false(),
+                            "disabled" => 0,
                         }
                     ],
                 }
@@ -250,7 +250,7 @@ sub addzoneconf {
     my $zone_data = {
         "name" => $zone,
         "kind" => "Native",
-        "dnssec" => JSON::false(),
+        "dnssec" => 0,
         "nameservers" => [],
     };
 
@@ -443,7 +443,7 @@ sub quickzoneadd {
     my $zone_data = {
         "name" => $zone,
         "kind" => "Native",
-        "dnssec" => JSON::false(),
+        "dnssec" => 0,
         "nameservers" => [],
     };
 
