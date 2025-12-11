@@ -20,7 +20,7 @@ sub get_config {
             },
             {
                 "name" => "pass",
-                "type" => "password",
+                "type" => "text",
                 "locale_text" => "PowerDNS API Token",
                 "required" => 1,
                 "help" => "Your PowerDNS API key/token for authentication",
