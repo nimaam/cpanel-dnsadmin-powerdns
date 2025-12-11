@@ -61,7 +61,8 @@ sub setup {
 
     # Create the node configuration file
     my $config_file = "$config_dir/powerdns";
-    if (!open(my $fh, ">", $config_file)) {
+    my $fh;
+    if (!open($fh, ">", $config_file)) {
         return (0, "Failed to create config file: $!");
     }
 
