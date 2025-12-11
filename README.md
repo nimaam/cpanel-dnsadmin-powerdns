@@ -136,6 +136,34 @@ After installation, test the integration:
 
 ## Troubleshooting
 
+### Server Not Appearing in DNS Cluster List
+
+**Issue:** The config file was created successfully (via CLI or web interface), but the server doesn't appear in the DNS Cluster list in WHM.
+
+**Solution:**
+
+1. **Add the server through the web interface** (even if config file exists):
+   - Navigate to: `WHM >> Clusters >> DNS Cluster`
+   - Click "Add a DNS Server"
+   - Select "PowerDNS" from the "Backend Type" dropdown
+   - Click "Configure"
+   - Fill in the configuration form with your API URL and key
+   - Click "Submit"
+   
+   **Note:** cPanel needs to register the server through its web interface. The CLI script (`add_server_cli.sh`) creates the config file, but cPanel's web interface must be used to actually register and display the server.
+
+2. **If the server still doesn't appear after adding through web interface:**
+   - Clear cPanel cache: `/usr/local/cpanel/scripts/update_cpanel_cache`
+   - Restart cPanel: `/scripts/restartsrv_cpsrvd`
+   - Wait 30-60 seconds, then refresh the DNS Cluster page
+   - Run the diagnostic script: `./check_cluster_status.sh`
+   - Run the refresh script: `./refresh_cluster.sh`
+
+3. **If PowerDNS doesn't appear in the Backend Type dropdown:**
+   - Verify module files are installed: `ls -la /usr/local/cpanel/Cpanel/NameServer/Setup/Remote/PowerDNS.pm`
+   - Check that dnsadmin is NOT in dormant services (WHM >> Tweak Settings)
+   - Reinstall the modules: `./install.sh`
+
 ### Module Not Appearing in Backend Type Menu
 
 **Important:** The syntax check error you see with system Perl is **normal and expected**. cPanel uses its own Perl interpreter with different module paths. The module will work when loaded by cPanel's Perl.
