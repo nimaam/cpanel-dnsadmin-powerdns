@@ -7,8 +7,8 @@ echo ""
 
 /usr/local/cpanel/3rdparty/bin/perl -I/usr/local/cpanel/Cpanel -I/usr/local/cpanel -e '
 use Cpanel::NameServer::Setup::Remote::PowerDNS;
-my $module = Cpanel::NameServer::Setup::Remote::PowerDNS->new();
-my $config = $module->get_config();
+# get_config is a class method, not instance method
+my $config = Cpanel::NameServer::Setup::Remote::PowerDNS->get_config();
 print "Config name: " . ($config->{"name"} || "N/A") . "\n";
 print "Options count: " . scalar(@{$config->{"options"}}) . "\n\n";
 print "Options:\n";
