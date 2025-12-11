@@ -12,13 +12,50 @@ Whostmgr::ACLS::init_acls();
 sub setup {
     my ($self, %OPTS) = @_;
 
+    # Log setup attempt for debugging
+    eval {
+        require Cpanel::Logger;
+        my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
+        $logger->info("PowerDNS setup method called with options: " . join(", ", keys %OPTS));
+    };
+
     if (!Whostmgr::ACLS::checkacl("clustering")) {
-        return (0, "User does not have the clustering ACL enabled.");
+        my $error = "User does not have the clustering ACL enabled.";
+        eval {
+            require Cpanel::Logger;
+            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
+            $logger->error("PowerDNS setup failed: $error");
+        };
+        return (0, $error);
     }
 
-    return (0, "No user given") if !defined $OPTS{"user"};
-    return (0, "No API key given") if !defined $OPTS{"apikey"};
-    return (0, "No API URL given") if !defined $OPTS{"api_url"};
+    if (!defined $OPTS{"user"}) {
+        my $error = "No user given";
+        eval {
+            require Cpanel::Logger;
+            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
+            $logger->error("PowerDNS setup failed: $error");
+        };
+        return (0, $error);
+    }
+    if (!defined $OPTS{"apikey"}) {
+        my $error = "No API key given";
+        eval {
+            require Cpanel::Logger;
+            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
+            $logger->error("PowerDNS setup failed: $error");
+        };
+        return (0, $error);
+    }
+    if (!defined $OPTS{"api_url"}) {
+        my $error = "No API URL given";
+        eval {
+            require Cpanel::Logger;
+            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
+            $logger->error("PowerDNS setup failed: $error");
+        };
+        return (0, $error);
+    }
 
     my $user    = $OPTS{"user"};
     my $apikey  = $OPTS{"apikey"};
@@ -109,7 +146,13 @@ sub setup {
     }
 
     if (!$connection_test_passed) {
-        return (0, $connection_error || "Failed to test PowerDNS API connection. Please verify API URL and key are correct.");
+        my $error = $connection_error || "Failed to test PowerDNS API connection. Please verify API URL and key are correct.";
+        eval {
+            require Cpanel::Logger;
+            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
+            $logger->error("PowerDNS setup failed: $error");
+        };
+        return (0, $error);
     }
 
     # Create config directories
@@ -134,8 +177,14 @@ sub setup {
         close($config_fh);
     }
     else {
-        warn "Could not write DNS trust configuration file: $!";
-        return (0, "The trust relationship could not be established, please examine /usr/local/cpanel/logs/error_log for more information.");
+        my $error = "Could not write DNS trust configuration file: $!";
+        warn $error;
+        eval {
+            require Cpanel::Logger;
+            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
+            $logger->error("PowerDNS setup failed: $error");
+        };
+        return (0, "The trust relationship could not be established, please examine /usr/local/cpanel/logs/error_log and /usr/local/cpanel/logs/dnsadmin_powerdns_setup_log for more information.");
     }
 
     # Copy to root config if user is root and root config doesn't exist
@@ -146,6 +195,12 @@ sub setup {
         );
     }
 
+    eval {
+        require Cpanel::Logger;
+        my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
+        $logger->info("PowerDNS setup successful for user: $user, API URL: $api_url");
+    };
+    
     return (1, "The trust relationship with PowerDNS has been established.", "", "powerdns");
 }
 
