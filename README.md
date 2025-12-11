@@ -18,9 +18,26 @@ This plugin allows cPanel to manage DNS zones and records through PowerDNS v4 AP
 
 ## Installation
 
-### 1. Copy Module Files
+### Automated Installation
 
-Copy the module files to their respective directories on your cPanel server:
+Use the provided installation script:
+
+```bash
+# Make script executable (if not already)
+chmod +x install.sh
+
+# Run installation
+./install.sh
+```
+
+The script will:
+- Copy module files to the correct locations
+- Set proper permissions
+- Verify Perl syntax (warnings about missing cPanel modules are normal)
+
+### Manual Installation
+
+Alternatively, you can manually copy the module files:
 
 ```bash
 # Copy Setup module
@@ -93,6 +110,30 @@ Your PowerDNS server must have:
 - Valid API key configured
 - Network access from cPanel server to PowerDNS server
 - Appropriate firewall rules
+
+## Uninstallation
+
+To completely remove the PowerDNS plugin from your cPanel server:
+
+```bash
+# Make script executable (if not already)
+chmod +x uninstall.sh
+
+# Run uninstallation
+./uninstall.sh
+```
+
+The uninstall script will:
+- Remove module files from `/usr/local/cpanel/Cpanel/NameServer/`
+- Remove all configuration files from `/var/cpanel/cluster/`
+- Remove log files from `/usr/local/cpanel/logs/`
+- Clear cPanel cache
+- Optionally restart cPanel service
+
+**Important:** Before uninstalling, ensure you have:
+- Migrated any DNS zones to another backend (if needed)
+- Removed the PowerDNS server from WHM DNS Cluster configuration
+- Backed up any important configuration data
 
 ## Features
 
