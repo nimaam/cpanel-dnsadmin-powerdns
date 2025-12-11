@@ -1,62 +1,42 @@
 package Cpanel::NameServer::Setup::Remote::PowerDNS;
 
 use strict;
-use warnings;
+use Cpanel::HTTP::Client ();
+use Cpanel::FileUtils::Copy ();
+use Cpanel::JSON ();
+use Whostmgr::ACLS ();
 
-use Cpanel::NameServer::Setup::Remote ();
-use LWP::UserAgent ();
-use HTTP::Request ();
-use JSON ();
+## no critic (RequireUseWarnings) -- requires auditing for potential warnings
 
-our @ISA = qw(Cpanel::NameServer::Setup::Remote);
+Whostmgr::ACLS::init_acls();
 
-# Create a method that returns the configuration form.
-sub get_config {
-    my %config = (
-        "name" => "PowerDNS",
-        "options" => [
-            {
-                "name" => "api_url",
-                "type" => "text",
-                "locale_text" => "PowerDNS API URL",
-                "required" => 1,
-                "help" => "Full URL to PowerDNS API (e.g., https://powerdns.example.com:8081/api/v1 or https://powerdns.example.com/api/v1)",
-            },
-            {
-                "name" => "pass",
-                "type" => "text",
-                "locale_text" => "PowerDNS API Token",
-                "required" => 1,
-                "help" => "Your PowerDNS API key/token for authentication",
-            },
-            {
-                "name" => "debug",
-                "type" => "binary",
-                "locale_text" => "Enable Debug Mode",
-                "default" => 0,
-            },
-        ],
-    );
-    return wantarray ? %config : \%config;
-}
-
-# Create a method that processes the configuration form data.
 sub setup {
     my ($self, %OPTS) = @_;
 
-    # Validate required fields
-    my $api_url = $OPTS{"api_url"} || return (0, "API URL is required.");
-    
-    # Check for password field - try multiple possible field names
-    my $api_key = $OPTS{"pass"} || $OPTS{"api_key"} || $OPTS{"password"} || "";
-    if (!$api_key) {
-        # Log what we received for debugging
-        my $received_keys = join(", ", keys %OPTS);
-        return (0, "API Token is required. Received fields: $received_keys");
+    if (!Whostmgr::ACLS::checkacl("clustering")) {
+        return (0, "User does not have the clustering ACL enabled.");
     }
-    
+
+    return (0, "No user given") if !defined $OPTS{"user"};
+    return (0, "No API key given") if !defined $OPTS{"apikey"};
+    return (0, "No API URL given") if !defined $OPTS{"api_url"};
+
+    my $user    = $OPTS{"user"};
+    my $apikey  = $OPTS{"apikey"};
+    my $api_url = $OPTS{"api_url"};
+
+    # Validate debug parameter
     my $debug = $OPTS{"debug"} ? 1 : 0;
-    my $user = $OPTS{"user"} || return (0, "User is required.");
+
+    # Validate and sanitize parameters
+    $user =~ tr/\r\n\f\0//d;
+    return (0, "Invalid user given") if !$user;
+
+    $apikey =~ tr/\r\n\f\0//d;
+    return (0, "Invalid API key given") if !$apikey;
+
+    $api_url =~ tr/\r\n\f\0//d;
+    return (0, "Invalid API URL given") if !$api_url;
 
     # Validate and normalize URL
     $api_url =~ s/\/+$//;  # Remove trailing slashes
@@ -73,70 +53,99 @@ sub setup {
 
     # Test API connection before saving configuration
     my $test_url = "$base_url/servers/localhost";
-    my $connection_error = "";
-    eval {
-        my $ua = LWP::UserAgent->new(
-            "timeout" => 10,
-            "agent" => "cPanel-dnsadmin-PowerDNS/1.0",
-            "ssl_opts" => { "verify_hostname" => 0 },  # Allow self-signed certs
-        );
-        my $request = HTTP::Request->new("GET" => $test_url);
-        $request->header("X-API-Key" => $api_key);
-        $request->header("Content-Type" => "application/json");
+    my $ua = Cpanel::HTTP::Client->new(
+        timeout    => 10,
+        keep_alive => 1,
+    );
 
-        my $response = $ua->request($request);
-        if (!$response->is_success) {
-            my $error_msg = "Failed to connect to PowerDNS API: " . $response->code() . " - " . $response->message();
-            if ($response->content()) {
-                eval {
-                    my $error_data = JSON::decode_json($response->content());
-                    if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
-                        $error_msg .= " - " . $error_data->{"error"};
-                    }
-                };
+    my $resp = $ua->get(
+        $test_url,
+        {
+            headers => {
+                "X-API-Key"     => $apikey,
+                "Content-Type"  => "application/json",
+                "Accept"        => "application/json",
             }
-            $connection_error = $error_msg;
         }
-    };
-    if ($@) {
-        # Connection test failed with exception - might be network issue or LWP problem
-        my $error_detail = $@;
-        $error_detail =~ s/ at .*$//;  # Remove file/line info
-        $connection_error = "Failed to test PowerDNS API connection: $error_detail";
-    }
-    
-    if ($connection_error) {
-        return (0, $connection_error);
-    }
+    );
 
-    # Create the config directory if it doesn't exist
-    my $config_dir = "/var/cpanel/cluster/$user/config";
-    if (!-d $config_dir) {
-        require Cpanel::FileUtils::TouchFile;
-        Cpanel::FileUtils::TouchFile::touchfile($config_dir);
-        chmod(0755, $config_dir);
+    if (!$resp->{"success"}) {
+        my $error_msg = "Failed to connect to PowerDNS API: " . ($resp->{"status"} || "unknown") . " - " . ($resp->{"reason"} || "connection failed");
+        if ($resp->{"content"}) {
+            eval {
+                my $error_data = Cpanel::JSON::Load($resp->{"content"});
+                if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
+                    $error_msg .= " - " . $error_data->{"error"};
+                }
+            };
+        }
+        return (0, $error_msg);
     }
 
-    # Create the node configuration file
-    my $config_file = "$config_dir/powerdns";
-    my $fh;
-    if (!open($fh, ">", $config_file)) {
-        return (0, "Failed to create config file: $!");
+    # Create config directories
+    my $safe_remote_user = $ENV{"REMOTE_USER"} || $user;
+    $safe_remote_user =~ s/\///g;
+    mkdir "/var/cpanel/cluster", 0700 if !-e "/var/cpanel/cluster";
+    mkdir "/var/cpanel/cluster/$safe_remote_user", 0700 if !-e "/var/cpanel/cluster/$safe_remote_user";
+    mkdir "/var/cpanel/cluster/$safe_remote_user/config", 0700 if !-e "/var/cpanel/cluster/$safe_remote_user/config";
+
+    # Write configuration file
+    my $config_file = "/var/cpanel/cluster/$safe_remote_user/config/powerdns";
+    if (open(my $config_fh, ">", $config_file)) {
+        chmod 0600, $config_file
+          or warn "Failed to secure permissions on cluster configuration: $!";
+        print {$config_fh} "#version 2.0\n";
+        print {$config_fh} "user=$user\n";
+        print {$config_fh} "api_url=$api_url\n";
+        print {$config_fh} "apikey=$apikey\n";
+        print {$config_fh} "pass=$apikey\n";  # Keep for backward compatibility
+        print {$config_fh} "module=PowerDNS\n";
+        print {$config_fh} "debug=$debug\n";
+        close($config_fh);
+    }
+    else {
+        warn "Could not write DNS trust configuration file: $!";
+        return (0, "The trust relationship could not be established, please examine /usr/local/cpanel/logs/error_log for more information.");
     }
 
-    # Write configuration file with version 2.0 header
-    print $fh "#version 2.0\n";
-    print $fh "user=$user\n";
-    print $fh "api_url=$api_url\n";
-    print $fh "pass=$api_key\n";
-    print $fh "module=PowerDNS\n";
-    print $fh "debug=" . ($debug ? "on" : "off") . "\n";
+    # Copy to root config if user is root and root config doesn't exist
+    if (!-e "/var/cpanel/cluster/root/config/powerdns" && Whostmgr::ACLS::hasroot()) {
+        Cpanel::FileUtils::Copy::safecopy(
+            "/var/cpanel/cluster/$safe_remote_user/config/powerdns",
+            "/var/cpanel/cluster/root/config/powerdns"
+        );
+    }
 
-    close($fh);
-    chmod(0600, $config_file);
+    return (1, "The trust relationship with PowerDNS has been established.", "", "powerdns");
+}
 
-    return (1, "PowerDNS node configuration created successfully.");
+sub get_config {
+    my %config = (
+        "name" => "PowerDNS",
+        "options" => [
+            {
+                "name"        => "api_url",
+                "type"        => "text",
+                "locale_text" => "PowerDNS API URL",
+                "required"    => 1,
+                "help"        => "Full URL to PowerDNS API (e.g., https://powerdns.example.com:8081/api/v1 or https://powerdns.example.com/api/v1)",
+            },
+            {
+                "name"        => "apikey",
+                "type"        => "text",
+                "locale_text" => "PowerDNS API Token",
+                "required"    => 1,
+                "help"        => "Your PowerDNS API key/token for authentication",
+            },
+            {
+                "name"        => "debug",
+                "type"        => "binary",
+                "locale_text" => "Enable Debug Mode",
+                "default"     => 0,
+            },
+        ],
+    );
+    return wantarray ? %config : \%config;
 }
 
 1;
-

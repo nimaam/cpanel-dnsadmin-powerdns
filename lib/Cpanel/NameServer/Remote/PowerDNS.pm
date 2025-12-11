@@ -7,9 +7,8 @@ use Cpanel::NameServer::Remote ();
 use Cpanel::NameServer::Constants ();
 use Cpanel::Logger ();
 use cPanel::PublicAPI ();
-use JSON ();
-use LWP::UserAgent ();
-use HTTP::Request ();
+use Cpanel::JSON ();
+use Cpanel::HTTP::Client ();
 use Cpanel::Encoder::URI ();
 use Cpanel::StringFunc::Match ();
 use Cpanel::StringFunc::Trim ();
@@ -24,17 +23,22 @@ sub new {
     my $api_url = $OPTS{"api_url"} || "";
     my ($base_url, $host) = $class->_parse_api_url($api_url);
 
+    # Support both "apikey" and "pass" for backward compatibility
+    my $apikey = $OPTS{"apikey"} || $OPTS{"pass"} || "";
+
     my $self = bless(
         {
             "api_url" => $api_url,
             "base_url" => $base_url,
             "host" => $host,
-            "pass" => $OPTS{"pass"},
+            "apikey" => $apikey,
+            "pass" => $apikey,  # Keep for backward compatibility
             "server_name" => "localhost",
             "debug" => ($OPTS{"debug"} && $OPTS{"debug"} eq "on") ? 1 : 0,
-            "logger" => $OPTS{"logger"},
+            "logger" => $OPTS{"logger"} || Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_log"}),
             "dnsrole" => $OPTS{"dnsrole"},
             "local_timeout" => $OPTS{"local_timeout"} || 30,
+            "remote_timeout" => $OPTS{"remote_timeout"} || 30,
         },
         $class
     );
@@ -44,14 +48,14 @@ sub new {
         {
             "host" => $self->{"host"},
             "user" => $OPTS{"user"} || "root",
-            "pass" => $self->{"pass"},
+            "pass" => $self->{"apikey"},
         }
     );
 
-    # Initialize HTTP client
-    $self->{"ua"} = LWP::UserAgent->new(
-        "timeout" => $self->{"local_timeout"},
-        "agent" => "cPanel-dnsadmin-PowerDNS/1.0",
+    # Initialize HTTP client using cPanel's HTTP client
+    $self->{"ua"} = Cpanel::HTTP::Client->new(
+        timeout    => $self->{"remote_timeout"},
+        keep_alive => 1,
     );
 
     return $self;
@@ -104,31 +108,57 @@ sub _powerdns_api_request {
     my $base_url = $self->_get_api_base_url();
     my $url = "$base_url$endpoint";
 
-    my $request = HTTP::Request->new($method => $url);
-    $request->header("X-API-Key" => $self->{"pass"});
-    $request->header("Content-Type" => "application/json");
+    my $headers = {
+        "X-API-Key"    => $self->{"apikey"},
+        "Content-Type" => "application/json",
+        "Accept"       => "application/json",
+    };
 
+    my $content = undef;
     if ($data && ($method eq "POST" || $method eq "PATCH" || $method eq "PUT")) {
-        $request->content(JSON::encode_json($data));
+        $content = Cpanel::JSON::Dump($data);
     }
 
     if ($self->{"debug"}) {
         $self->{"logger"}->info("PowerDNS API Request: $method $url");
-        $self->{"logger"}->info("Request Data: " . ($data ? JSON::encode_json($data) : ""));
+        $self->{"logger"}->info("Request Data: " . ($content || ""));
     }
 
-    my $response = $self->{"ua"}->request($request);
-
-    if ($self->{"debug"}) {
-        $self->{"logger"}->info("PowerDNS API Response Status: " . $response->code());
-        $self->{"logger"}->info("PowerDNS API Response: " . $response->content());
+    my $resp;
+    if ($method eq "GET") {
+        $resp = $self->{"ua"}->get($url, {"headers" => $headers});
+    }
+    elsif ($method eq "POST") {
+        $resp = $self->{"ua"}->post($url, {"headers" => $headers, "content" => $content});
+    }
+    elsif ($method eq "PATCH") {
+        $resp = $self->{"ua"}->patch($url, {"headers" => $headers, "content" => $content});
+    }
+    elsif ($method eq "PUT") {
+        $resp = $self->{"ua"}->put($url, {"headers" => $headers, "content" => $content});
+    }
+    elsif ($method eq "DELETE") {
+        $resp = $self->{"ua"}->delete($url, {"headers" => $headers});
+    }
+    else {
+        $self->{"error"} = "Unsupported HTTP method: $method";
+        return undef;
     }
 
-    if (!$response->is_success) {
-        $self->{"error"} = "PowerDNS API error: " . $response->code() . " - " . $response->message();
-        if ($response->content()) {
+    my ($is_success, $page) = ($resp->{"success"}, \$resp->{"content"});
+    my $error = $is_success ? "" : ($resp->{"status"} || "unknown") . " " . ($resp->{"reason"} || "unknown error");
+
+    if ($self->{"debug"} || !$is_success) {
+        $self->{"logger"}->info("PowerDNS API Response Status: " . ($resp->{"status"} || "N/A"));
+        $self->{"logger"}->info("PowerDNS API Response: " . (ref($page) ? $$page : $page || ""));
+        $self->{"logger"}->info("ERROR: $error") if $error;
+    }
+
+    if (!$is_success) {
+        $self->{"error"} = "PowerDNS API error: $error";
+        if (ref($page) && $$page) {
             eval {
-                my $error_data = JSON::decode_json($response->content());
+                my $error_data = Cpanel::JSON::Load($$page);
                 if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
                     $self->{"error"} .= " - " . $error_data->{"error"};
                 }
@@ -137,11 +167,11 @@ sub _powerdns_api_request {
         return undef;
     }
 
-    if ($response->content()) {
+    if (ref($page) && $$page) {
         eval {
-            return JSON::decode_json($response->content());
+            return Cpanel::JSON::Load($$page);
         };
-        return $response->content();
+        return $$page;
     }
 
     return 1;
@@ -172,7 +202,7 @@ sub _cpanel_to_powerdns_zone {
                     "records" => [
                         {
                             "content" => $content,
-                            "disabled" => JSON::false,
+                            "disabled" => JSON::false(),
                         }
                     ],
                 }
@@ -220,7 +250,7 @@ sub addzoneconf {
     my $zone_data = {
         "name" => $zone,
         "kind" => "Native",
-        "dnssec" => JSON::false,
+        "dnssec" => JSON::false(),
         "nameservers" => [],
     };
 
@@ -413,7 +443,7 @@ sub quickzoneadd {
     my $zone_data = {
         "name" => $zone,
         "kind" => "Native",
-        "dnssec" => JSON::false,
+        "dnssec" => JSON::false(),
         "nameservers" => [],
     };
 
