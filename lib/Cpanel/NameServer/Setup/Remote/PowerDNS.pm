@@ -51,36 +51,65 @@ sub setup {
     }
 
     # Test API connection before saving configuration
-    # Load HTTP::Client only when needed (lazy loading)
-    require Cpanel::HTTP::Client;
-    my $test_url = "$base_url/servers/localhost";
-    my $ua = Cpanel::HTTP::Client->new(
-        timeout    => 10,
-        keep_alive => 1,
-    );
+    # Try to use Cpanel::HTTP::Client, but fall back to curl if it fails
+    my $connection_test_passed = 0;
+    my $connection_error       = "";
 
-    my $resp = $ua->get(
-        $test_url,
-        {
-            headers => {
-                "X-API-Key"     => $apikey,
-                "Content-Type"  => "application/json",
-                "Accept"        => "application/json",
+    eval {
+        require Cpanel::HTTP::Client;
+        my $test_url = "$base_url/servers/localhost";
+        my $ua = Cpanel::HTTP::Client->new(
+            timeout    => 10,
+            keep_alive => 1,
+        );
+
+        my $resp = $ua->get(
+            $test_url,
+            {
+                headers => {
+                    "X-API-Key"     => $apikey,
+                    "Content-Type"  => "application/json",
+                    "Accept"        => "application/json",
+                }
+            }
+        );
+
+        if ($resp->{"success"}) {
+            $connection_test_passed = 1;
+        }
+        else {
+            $connection_error = "Failed to connect to PowerDNS API: " . ($resp->{"status"} || "unknown") . " - " . ($resp->{"reason"} || "connection failed");
+            if ($resp->{"content"}) {
+                eval {
+                    my $error_data = Cpanel::JSON::Load($resp->{"content"});
+                    if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
+                        $connection_error .= " - " . $error_data->{"error"};
+                    }
+                };
             }
         }
-    );
+    };
 
-    if (!$resp->{"success"}) {
-        my $error_msg = "Failed to connect to PowerDNS API: " . ($resp->{"status"} || "unknown") . " - " . ($resp->{"reason"} || "connection failed");
-        if ($resp->{"content"}) {
-            eval {
-                my $error_data = Cpanel::JSON::Load($resp->{"content"});
-                if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
-                    $error_msg .= " - " . $error_data->{"error"};
-                }
-            };
+    # If HTTP::Client failed to load or test failed, try curl as fallback
+    if (!$connection_test_passed && ($@ || $connection_error)) {
+        my $test_url = "$base_url/servers/localhost";
+        my $curl_cmd = "curl -s -w '\\nHTTP_CODE:%{http_code}' --max-time 10 -H 'X-API-Key: $apikey' -H 'Content-Type: application/json' '$test_url' 2>&1";
+        my $curl_output = `$curl_cmd`;
+        my $http_code = "";
+        if ($curl_output =~ /HTTP_CODE:(\d+)/) {
+            $http_code = $1;
         }
-        return (0, $error_msg);
+
+        if ($http_code eq "200") {
+            $connection_test_passed = 1;
+        }
+        else {
+            $connection_error = "Failed to connect to PowerDNS API (HTTP $http_code). Please verify API URL and key are correct.";
+        }
+    }
+
+    if (!$connection_test_passed) {
+        return (0, $connection_error || "Failed to test PowerDNS API connection. Please verify API URL and key are correct.");
     }
 
     # Create config directories
