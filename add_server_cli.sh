@@ -41,36 +41,58 @@ echo ""
 
 # Call setup method directly via Perl
 echo "2. Calling setup method..."
+echo "   (This will show detailed error messages if it fails)"
+echo ""
+
 /usr/local/cpanel/3rdparty/bin/perl -I/usr/local/cpanel/Cpanel -I/usr/local/cpanel -e '
-use Cpanel::NameServer::Setup::Remote::PowerDNS;
+use strict;
+use warnings;
+
+# Set REMOTE_USER environment variable (cPanel uses this)
+$ENV{"REMOTE_USER"} = shift;
 
 my $api_url = shift;
 my $api_key = shift;
 my $username = shift;
 my $debug = shift;
 
-# Create a mock object (setup is called as instance method)
-my $module = bless({}, "Cpanel::NameServer::Setup::Remote::PowerDNS");
+eval {
+    require Cpanel::NameServer::Setup::Remote::PowerDNS;
+};
+if ($@) {
+    print "❌ Failed to load module: $@\n";
+    exit 1;
+}
 
-my ($success, $message, $extra1, $extra2) = $module->setup(
-    "user" => $username,
-    "api_url" => $api_url,
-    "apikey" => $api_key,
-    "debug" => $debug ? 1 : 0
-);
+# Try calling setup as class method first (how cPanel might call it)
+my ($success, $message, $extra1, $extra2);
+eval {
+    # Setup is an instance method, but cPanel might instantiate it
+    # Let'\''s try calling it on the package (class method)
+    ($success, $message, $extra1, $extra2) = Cpanel::NameServer::Setup::Remote::PowerDNS->setup(
+        "user" => $username,
+        "api_url" => $api_url,
+        "apikey" => $api_key,
+        "debug" => $debug ? 1 : 0
+    );
+};
+if ($@) {
+    print "❌ Error calling setup method: $@\n";
+    exit 1;
+}
 
 if ($success) {
     print "✅ Setup successful!\n";
     print "Message: $message\n";
-    print "Extra1: " . ($extra1 || "N/A") . "\n";
-    print "Extra2: " . ($extra2 || "N/A") . "\n";
+    if ($extra1) { print "Extra1: $extra1\n"; }
+    if ($extra2) { print "Extra2: $extra2\n"; }
     exit 0;
 } else {
     print "❌ Setup failed!\n";
     print "Error: $message\n";
     exit 1;
 }
-' "$API_URL" "$API_KEY" "$USERNAME" "$DEBUG" 2>&1
+' "$USERNAME" "$API_URL" "$API_KEY" "$USERNAME" "$DEBUG" 2>&1
 
 EXIT_CODE=$?
 
