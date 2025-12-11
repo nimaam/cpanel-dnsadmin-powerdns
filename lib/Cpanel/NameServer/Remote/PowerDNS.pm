@@ -125,25 +125,10 @@ sub _powerdns_api_request {
     }
 
     my $resp;
-    if ($method eq "GET") {
-        $resp = $self->{"ua"}->get($url, {"headers" => $headers});
-    }
-    elsif ($method eq "POST") {
-        $resp = $self->{"ua"}->post($url, {"headers" => $headers, "content" => $content});
-    }
-    elsif ($method eq "PATCH") {
-        $resp = $self->{"ua"}->patch($url, {"headers" => $headers, "content" => $content});
-    }
-    elsif ($method eq "PUT") {
-        $resp = $self->{"ua"}->put($url, {"headers" => $headers, "content" => $content});
-    }
-    elsif ($method eq "DELETE") {
-        $resp = $self->{"ua"}->delete($url, {"headers" => $headers});
-    }
-    else {
-        $self->{"error"} = "Unsupported HTTP method: $method";
-        return undef;
-    }
+    my $request_opts = {"headers" => $headers};
+    $request_opts->{"content"} = $content if defined $content;
+
+    $resp = $self->{"ua"}->request($method, $url, $request_opts);
 
     my ($is_success, $page) = ($resp->{"success"}, \$resp->{"content"});
     my $error = $is_success ? "" : ($resp->{"status"} || "unknown") . " " . ($resp->{"reason"} || "unknown error");
