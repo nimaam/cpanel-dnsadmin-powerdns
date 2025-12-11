@@ -19,10 +19,11 @@ sub get_config {
                 "help" => "Full URL to PowerDNS API (e.g., https://powerdns.example.com:8081/api/v1 or https://powerdns.example.com/api/v1)",
             },
             {
-                "name" => "api_key",
+                "name" => "pass",
                 "type" => "password",
                 "locale_text" => "PowerDNS API Token",
                 "required" => 1,
+                "help" => "Your PowerDNS API key/token for authentication",
             },
             {
                 "name" => "debug",
@@ -41,7 +42,7 @@ sub setup {
 
     # Validate required fields
     my $api_url = $OPTS{"api_url"} || return (0, "API URL is required.");
-    my $api_key = $OPTS{"api_key"} || return (0, "API Token is required.");
+    my $api_key = $OPTS{"pass"} || return (0, "API Token is required.");
     my $debug = $OPTS{"debug"} ? 1 : 0;
     my $user = $OPTS{"user"} || return (0, "User is required.");
 
