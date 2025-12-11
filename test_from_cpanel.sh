@@ -71,11 +71,18 @@ echo ""
 
 # Test 5: Check if PowerDNS is listening on the expected interface
 echo "5. Checking local PowerDNS configuration..."
-if [ -f "/etc/powerdns/pdns.conf" ]; then
-    echo "   PowerDNS config found:"
-    grep -E "webserver|api|webserver-address|webserver-port" /etc/powerdns/pdns.conf 2>/dev/null | head -5 | sed 's/^/      /' || echo "      (no webserver config found)"
+PDNS_CONF=""
+if [ -f "/etc/pdns/pdns.conf" ]; then
+    PDNS_CONF="/etc/pdns/pdns.conf"
+elif [ -f "/etc/powerdns/pdns.conf" ]; then
+    PDNS_CONF="/etc/powerdns/pdns.conf"
+fi
+
+if [ -n "$PDNS_CONF" ]; then
+    echo "   PowerDNS config found: $PDNS_CONF"
+    grep -E "webserver|api|webserver-address|webserver-port" "$PDNS_CONF" 2>/dev/null | head -5 | sed 's/^/      /' || echo "      (no webserver config found)"
 else
-    echo "   ⚠️  PowerDNS config not found at /etc/powerdns/pdns.conf"
+    echo "   ⚠️  PowerDNS config not found at /etc/pdns/pdns.conf or /etc/powerdns/pdns.conf"
 fi
 
 echo ""

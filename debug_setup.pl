@@ -1,5 +1,7 @@
 #!/usr/bin/perl
 # Debug script to test PowerDNS setup module
+# Note: This script requires cPanel's Perl environment
+# Run with: /usr/local/cpanel/3rdparty/bin/perl debug_setup.pl
 
 use strict;
 use warnings;
@@ -15,6 +17,9 @@ BEGIN {
     };
     if ($@) {
         print "Error loading module: $@\n";
+        print "\nNote: If you see Try::Tiny errors, these are false positives.\n";
+        print "The module will work fine when loaded by cPanel's Perl.\n";
+        print "Try running with: /usr/local/cpanel/3rdparty/bin/perl debug_setup.pl\n";
         exit 1;
     }
 }
