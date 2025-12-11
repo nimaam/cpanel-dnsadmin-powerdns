@@ -46,7 +46,15 @@ sub setup {
 
     # Validate required fields
     my $api_url = $OPTS{"api_url"} || return (0, "API URL is required.");
-    my $api_key = $OPTS{"pass"} || return (0, "API Token is required.");
+    
+    # Check for password field - try multiple possible field names
+    my $api_key = $OPTS{"pass"} || $OPTS{"api_key"} || $OPTS{"password"} || "";
+    if (!$api_key) {
+        # Log what we received for debugging
+        my $received_keys = join(", ", keys %OPTS);
+        return (0, "API Token is required. Received fields: $received_keys");
+    }
+    
     my $debug = $OPTS{"debug"} ? 1 : 0;
     my $user = $OPTS{"user"} || return (0, "User is required.");
 
