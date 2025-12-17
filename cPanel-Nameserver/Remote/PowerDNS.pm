@@ -455,9 +455,10 @@ sub getpath {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     # Get hostname from self->host or self->name
+    # The "host" field should contain the hostname (stored in config file)
     my $hostname = $self->{"host"} || $self->{"name"} || "";
     
-    # If hostname is an IP address, try to get hostname from API URL or resolve it
+    # If hostname is an IP address, try to resolve it to hostname
     if ($hostname =~ /^\d+\.\d+\.\d+\.\d+$/) {
         # First, try to extract hostname from API URL (if API URL has hostname, not IP)
         if ($self->{"api_url"} && $self->{"api_url"} =~ /https?:\/\/([^:\/]+)/) {
@@ -472,7 +473,7 @@ sub getpath {
                     my $packed_ip = Socket::inet_aton($hostname);
                     if ($packed_ip) {
                         my $resolved = Socket::gethostbyaddr($packed_ip, Socket::AF_INET());
-                        $hostname = $resolved if $resolved && $resolved ne $hostname;
+                        $hostname = $resolved if $resolved && $resolved ne $hostname && $resolved;
                     }
                 };
             }
@@ -483,7 +484,7 @@ sub getpath {
                 my $packed_ip = Socket::inet_aton($hostname);
                 if ($packed_ip) {
                     my $resolved = Socket::gethostbyaddr($packed_ip, Socket::AF_INET());
-                    $hostname = $resolved if $resolved && $resolved ne $hostname;
+                    $hostname = $resolved if $resolved && $resolved ne $hostname && $resolved;
                 }
             };
         }

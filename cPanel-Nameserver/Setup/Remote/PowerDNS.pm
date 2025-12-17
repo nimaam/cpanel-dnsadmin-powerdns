@@ -43,11 +43,20 @@ sub setup {
         return (0, "API URL must start with http:// or https://");
     }
 
-    # Parse API URL to get base URL
+    # Parse API URL to get base URL and extract hostname
     my $base_url = $api_url;
     if ($base_url !~ /\/api\/v1$/) {
         $base_url =~ s/\/+$//;
         $base_url .= "/api/v1";
+    }
+    
+    # Extract hostname from API URL (for display purposes)
+    # If API URL uses IP, we'll try to resolve it later, but store what we can get
+    my $hostname = "";
+    if ($api_url =~ /https?:\/\/([^:\/]+)/) {
+        $hostname = $1;
+        # If it's an IP, we'll leave it as is (getpath will try to resolve it)
+        # If it's a hostname, use it
     }
 
     # Test API connection before saving configuration
@@ -131,6 +140,11 @@ sub setup {
         print {$config_fh} "pass=$apikey\n";  # Keep for backward compatibility
         print {$config_fh} "module=PowerDNS\n";
         print {$config_fh} "debug=$debug\n";
+        # Store hostname for display (extracted from API URL)
+        # This helps cPanel identify the node correctly
+        if ($hostname) {
+            print {$config_fh} "host=$hostname\n";
+        }
         close($config_fh);
     }
     else {

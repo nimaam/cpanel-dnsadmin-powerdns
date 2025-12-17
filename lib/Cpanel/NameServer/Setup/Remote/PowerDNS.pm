@@ -12,53 +12,15 @@ Whostmgr::ACLS::init_acls();
 sub setup {
     my ($self, %OPTS) = @_;
 
-    # Log setup attempt for debugging
-    eval {
-        require Cpanel::Logger;
-        my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
-        $logger->info("PowerDNS setup method called with options: " . join(", ", keys %OPTS));
-    };
-
     if (!Whostmgr::ACLS::checkacl("clustering")) {
-        my $error = "User does not have the clustering ACL enabled.";
-        eval {
-            require Cpanel::Logger;
-            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
-            $logger->error("PowerDNS setup failed: $error");
-        };
-        return (0, $error);
+        return (0, "User does not have the clustering ACL enabled.");
     }
 
-    # Support both "user" and "cluster_user" parameter names
-    my $user = $OPTS{"user"} || $OPTS{"cluster_user"} || $ENV{"REMOTE_USER"};
-    if (!defined $user || $user eq "") {
-        my $error = "No user given";
-        eval {
-            require Cpanel::Logger;
-            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
-            $logger->error("PowerDNS setup failed: $error");
-        };
-        return (0, $error);
-    }
-    if (!defined $OPTS{"apikey"}) {
-        my $error = "No API key given";
-        eval {
-            require Cpanel::Logger;
-            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
-            $logger->error("PowerDNS setup failed: $error");
-        };
-        return (0, $error);
-    }
-    if (!defined $OPTS{"api_url"}) {
-        my $error = "No API URL given";
-        eval {
-            require Cpanel::Logger;
-            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
-            $logger->error("PowerDNS setup failed: $error");
-        };
-        return (0, $error);
-    }
+    return (0, "No user given") if !defined $OPTS{"user"};
+    return (0, "No API key given") if !defined $OPTS{"apikey"};
+    return (0, "No API URL given") if !defined $OPTS{"api_url"};
 
+    my $user    = $OPTS{"user"};
     my $apikey  = $OPTS{"apikey"};
     my $api_url = $OPTS{"api_url"};
 
@@ -81,11 +43,20 @@ sub setup {
         return (0, "API URL must start with http:// or https://");
     }
 
-    # Parse API URL to get base URL
+    # Parse API URL to get base URL and extract hostname
     my $base_url = $api_url;
     if ($base_url !~ /\/api\/v1$/) {
         $base_url =~ s/\/+$//;
         $base_url .= "/api/v1";
+    }
+    
+    # Extract hostname from API URL (for display purposes)
+    # If API URL uses IP, we'll try to resolve it later, but store what we can get
+    my $hostname = "";
+    if ($api_url =~ /https?:\/\/([^:\/]+)/) {
+        $hostname = $1;
+        # If it's an IP, we'll leave it as is (getpath will try to resolve it)
+        # If it's a hostname, use it
     }
 
     # Test API connection before saving configuration
@@ -147,13 +118,7 @@ sub setup {
     }
 
     if (!$connection_test_passed) {
-        my $error = $connection_error || "Failed to test PowerDNS API connection. Please verify API URL and key are correct.";
-        eval {
-            require Cpanel::Logger;
-            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
-            $logger->error("PowerDNS setup failed: $error");
-        };
-        return (0, $error);
+        return (0, $connection_error || "Failed to test PowerDNS API connection. Please verify API URL and key are correct.");
     }
 
     # Create config directories
@@ -175,17 +140,16 @@ sub setup {
         print {$config_fh} "pass=$apikey\n";  # Keep for backward compatibility
         print {$config_fh} "module=PowerDNS\n";
         print {$config_fh} "debug=$debug\n";
+        # Store hostname for display (extracted from API URL)
+        # This helps cPanel identify the node correctly
+        if ($hostname) {
+            print {$config_fh} "host=$hostname\n";
+        }
         close($config_fh);
     }
     else {
-        my $error = "Could not write DNS trust configuration file: $!";
-        warn $error;
-        eval {
-            require Cpanel::Logger;
-            my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
-            $logger->error("PowerDNS setup failed: $error");
-        };
-        return (0, "The trust relationship could not be established, please examine /usr/local/cpanel/logs/error_log and /usr/local/cpanel/logs/dnsadmin_powerdns_setup_log for more information.");
+        warn "Could not write DNS trust configuration file: $!";
+        return (0, "The trust relationship could not be established, please examine /usr/local/cpanel/logs/error_log for more information.");
     }
 
     # Copy to root config if user is root and root config doesn't exist
@@ -196,12 +160,6 @@ sub setup {
         );
     }
 
-    eval {
-        require Cpanel::Logger;
-        my $logger = Cpanel::Logger->new({"alternate_logfile" => "/usr/local/cpanel/logs/dnsadmin_powerdns_setup_log"});
-        $logger->info("PowerDNS setup successful for user: $user, API URL: $api_url");
-    };
-    
     return (1, "The trust relationship with PowerDNS has been established.", "", "powerdns");
 }
 
