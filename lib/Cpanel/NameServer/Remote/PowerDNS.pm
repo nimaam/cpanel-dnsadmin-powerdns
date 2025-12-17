@@ -450,19 +450,47 @@ sub getips {
 
 # Create a method that lists the nodes with which the current node is peered.
 # This should return the hostname in a format cPanel expects
+# Format: "hostname\n" (one hostname per line, like SoftLayer does)
 sub getpath {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     # Get hostname from self->host or self->name
     my $hostname = $self->{"host"} || $self->{"name"} || "";
     
-    # If hostname is an IP, try to get the actual hostname from API URL
+    # If hostname is an IP address, try to get hostname from API URL or resolve it
     if ($hostname =~ /^\d+\.\d+\.\d+\.\d+$/) {
-        # If host is an IP, try to extract hostname from API URL
+        # First, try to extract hostname from API URL (if API URL has hostname, not IP)
         if ($self->{"api_url"} && $self->{"api_url"} =~ /https?:\/\/([^:\/]+)/) {
-            $hostname = $1;
+            my $url_host = $1;
+            # Only use URL host if it's not an IP (it's a hostname)
+            if ($url_host !~ /^\d+\.\d+\.\d+\.\d+$/) {
+                $hostname = $url_host;
+            } else {
+                # If API URL also has IP, try reverse DNS lookup
+                eval {
+                    require Socket;
+                    my $packed_ip = Socket::inet_aton($hostname);
+                    if ($packed_ip) {
+                        my $resolved = Socket::gethostbyaddr($packed_ip, Socket::AF_INET());
+                        $hostname = $resolved if $resolved && $resolved ne $hostname;
+                    }
+                };
+            }
+        } else {
+            # Try reverse DNS lookup if no API URL
+            eval {
+                require Socket;
+                my $packed_ip = Socket::inet_aton($hostname);
+                if ($packed_ip) {
+                    my $resolved = Socket::gethostbyaddr($packed_ip, Socket::AF_INET());
+                    $hostname = $resolved if $resolved && $resolved ne $hostname;
+                }
+            };
         }
     }
+    
+    # Ensure we have a hostname (fallback to host if still empty)
+    $hostname = $self->{"host"} || $self->{"name"} || "unknown" if !$hostname;
     
     # Return hostname (cPanel expects hostname on its own line)
     $self->output($hostname . "\n");
