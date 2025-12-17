@@ -715,14 +715,23 @@ sub determine_error_type {
     # to the raw error string. The parent implementation will incorporate
     # $self->{'publicapi'}->{error} into its final message.
     my $msg = defined $action_desc && length $action_desc ? $action_desc : $error_msg;
+    
+    # Ensure we have a valid error message
+    $msg = $self->{'publicapi'}->{'error'} || $error_msg || "Unknown error" if !$msg || !length $msg;
 
     my ($error_type, $error_message, $is_recoverable_error) = $self->SUPER::determine_error_type($msg);
     
     # Ensure we always return a valid error type (fallback to GENERIC if undefined)
-    if (!defined $error_type) {
+    if (!defined $error_type || $error_type == 0) {
         $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
         $is_recoverable_error = 0;
     }
+    
+    # Ensure error_message is defined
+    $error_message = "Unknown error" if !defined $error_message || !length $error_message;
+    
+    # Ensure is_recoverable_error is defined
+    $is_recoverable_error = 0 if !defined $is_recoverable_error;
     
     return ($error_type, $error_message, $is_recoverable_error);
 }
@@ -730,20 +739,35 @@ sub determine_error_type {
 # Override is_recoverable_error to handle undefined values gracefully
 # This prevents "Use of uninitialized value" warnings when error_type is undefined
 # When called as a method, Perl passes $self as first argument
+# When called as a function, only the error_type is passed
 sub is_recoverable_error {
     my ($self_or_error_type, $error_type) = @_;
     
     # If called as method ($self->is_recoverable_error($error_type)), 
-    # $self_or_error_type is $self and $error_type is the actual error type
+    # $self_or_error_type is $self (a blessed reference) and $error_type is the actual error type
     # If called as function (is_recoverable_error($error_type)),
-    # $self_or_error_type is the error type
-    my $actual_error_type = defined $error_type ? $error_type : $self_or_error_type;
+    # $self_or_error_type is the error type and $error_type is undef
+    my $actual_error_type;
+    if (ref($self_or_error_type) && ref($self_or_error_type) =~ /^Cpanel::NameServer::Remote/) {
+        # Called as method: $self->is_recoverable_error($error_type)
+        $actual_error_type = $error_type;
+    } else {
+        # Called as function: is_recoverable_error($error_type)
+        $actual_error_type = $self_or_error_type;
+    }
     
-    # Return 0 (not recoverable) if error_type is undefined
-    return 0 if !defined $actual_error_type;
+    # Return 0 (not recoverable) if error_type is undefined or 0
+    return 0 if !defined $actual_error_type || $actual_error_type == 0;
     
     # Call parent function with defined value
-    return Cpanel::NameServer::Remote::is_recoverable_error($actual_error_type);
+    # Use eval to catch any warnings/errors from the parent function
+    my $result;
+    {
+        local $SIG{__WARN__} = sub {};  # Suppress warnings
+        $result = Cpanel::NameServer::Remote::is_recoverable_error($actual_error_type);
+    }
+    
+    return defined $result ? $result : 0;
 }
 
 1;
