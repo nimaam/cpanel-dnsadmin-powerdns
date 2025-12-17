@@ -26,3 +26,7 @@ echo "Note: If the above shows PowerDNS, the backend is registered."
 echo "You may need to use the web interface to configure it."
 echo ""
 
+
+
+
+

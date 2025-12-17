@@ -122,3 +122,7 @@ echo "3. Try adding the server again and watch logs:"
 echo "   tail -f /usr/local/cpanel/logs/error_log | grep -i powerdns"
 echo ""
 
+
+
+
+
