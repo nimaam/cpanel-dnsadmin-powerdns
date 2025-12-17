@@ -12,8 +12,10 @@ use Cpanel::HTTP::Client ();
 use Cpanel::Encoder::URI ();
 use Cpanel::StringFunc::Match ();
 use Cpanel::StringFunc::Trim ();
+use Cpanel::SocketIP ();
 
 our @ISA = qw(Cpanel::NameServer::Remote);
+our $VERSION = '1.0';
 
 # Initialize the module
 sub new {
@@ -413,17 +415,19 @@ sub zoneexists {
 sub getips {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    # Get server statistics to find IP addresses
-    my $stats = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/statistics");
-
-    # For PowerDNS, we typically get IPs from the server configuration
-    # This is a simplified implementation - may need adjustment
     my $output = "";
-    if ($stats && ref($stats) eq "ARRAY") {
-        # Extract IP addresses from statistics if available
-        foreach my $stat (@$stats) {
-            if (ref($stat) eq "HASH" && $stat->{"name"} && $stat->{"name"} =~ /ip/) {
-                $output .= $stat->{"value"} . "\n" if $stat->{"value"};
+    my $host = $self->{"host"} || "";
+
+    # Try to resolve IP from hostname
+    if ($host) {
+        # Extract IP if host is already an IP address
+        if ($host =~ /^(\d+\.\d+\.\d+\.\d+)$/) {
+            $output = $1 . "\n";
+        } else {
+            # Try to resolve hostname to IP
+            my $ip = Cpanel::SocketIP::_resolveIpAddress($host);
+            if ($ip) {
+                $output = $ip . "\n";
             }
         }
     }
@@ -433,36 +437,48 @@ sub getips {
         $output = $self->{"publicapi"}->getips_local($unique_dns_request_id) || "";
     }
 
+    # If still no output, try to extract IP from API URL
+    if (!$output && $self->{"api_url"}) {
+        if ($self->{"api_url"} =~ /(\d+\.\d+\.\d+\.\d+)/) {
+            $output = $1 . "\n";
+        }
+    }
+
     $self->output($output);
     return $self->_check_action("receive an ips list", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 }
 
 # Create a method that lists the nodes with which the current node is peered.
+# This should return the hostname in a format cPanel expects
 sub getpath {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    # For PowerDNS, return the server name as the path
-    my $path = $self->{"host"} . "\n";
-    $self->output($path);
+    # Get hostname from self->host or self->name
+    my $hostname = $self->{"host"} || $self->{"name"} || "";
+    
+    # If hostname is an IP, try to get the actual hostname from API URL
+    if ($hostname =~ /^\d+\.\d+\.\d+\.\d+$/) {
+        # If host is an IP, try to extract hostname from API URL
+        if ($self->{"api_url"} && $self->{"api_url"} =~ /https?:\/\/([^:\/]+)/) {
+            $hostname = $1;
+        }
+    }
+    
+    # Return hostname (cPanel expects hostname on its own line)
+    $self->output($hostname . "\n");
 
     return $self->_check_action("getpath", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 }
 
 # Create a method that gets a module's version number.
+# This should return the module version, not the PowerDNS server version
+# Returning a simple version string ensures cPanel can identify the remote type
 sub version {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
-
-    # Get PowerDNS server version
-    my $server_info = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}");
-
-    if ($server_info && ref($server_info) eq "HASH" && $server_info->{"version"}) {
-        return $server_info->{"version"};
-    }
-
-    # Fallback to PublicAPI version
-    my $version = $self->{"publicapi"}->version();
-    # Error is already in publicapi->error, no need to copy
-    return $version || "1.0";
+    
+    # Return module version (like SoftLayer and VPSNET do)
+    # This is used by cPanel to identify the remote type
+    return $VERSION;
 }
 
 # Create a method to quickly add a zone.
