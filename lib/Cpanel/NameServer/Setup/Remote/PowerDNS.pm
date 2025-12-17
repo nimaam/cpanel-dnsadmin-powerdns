@@ -153,7 +153,11 @@ sub setup {
     }
 
     if (!$connection_test_passed) {
-        return (0, $connection_error || "Failed to test PowerDNS API connection. Please verify API URL and key are correct.");
+        # If we got a specific error message, use it; otherwise provide a generic one
+        my $error_msg = $connection_error || "Failed to test PowerDNS API connection. Please verify API URL and key are correct.";
+        # Log the error for debugging
+        warn "PowerDNS setup connection test failed: $error_msg";
+        return (0, $error_msg);
     }
 
     # Create config directories
