@@ -300,8 +300,9 @@ sub getzone {
 sub getzones {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    chomp($dataref->{"zone"});
-    chomp($dataref->{"zones"});
+    # Guard against undef keys to avoid "Use of uninitialized value in chomp" warnings
+    chomp($dataref->{"zone"})  if defined $dataref->{"zone"};
+    chomp($dataref->{"zones"}) if defined $dataref->{"zones"};
 
     my $zones_list = $dataref->{"zones"} || $dataref->{"zone"} || "";
     my @zones = split(/,/, $zones_list);
@@ -560,6 +561,21 @@ sub revokekeys {
     $self->output($result);
 
     return $self->_check_action("revoke keys: $zone", $Cpanel::NameServer::Constants::QUEUE);
+}
+
+# Override determine_error_type for compatibility with cPanel versions
+# whose parent class _check_action calls determine_error_type with 2 arguments
+# (error_msg and action_desc), but the parent implementation only expects 1.
+# This prevents "Too many arguments" fatal errors.
+sub determine_error_type {
+    my ($self, $error_msg, $action_desc) = @_;
+
+    # Use the human-readable action description if provided, otherwise fall back
+    # to the raw error string. The parent implementation will incorporate
+    # $self->{'publicapi'}->{error} into its final message.
+    my $msg = defined $action_desc && length $action_desc ? $action_desc : $error_msg;
+
+    return $self->SUPER::determine_error_type($msg);
 }
 
 1;
