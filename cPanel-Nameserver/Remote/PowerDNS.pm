@@ -726,9 +726,17 @@ sub determine_error_type {
     };
     
     # If parent call failed or returned invalid values, use defaults
-    if ($@ || !defined $error_type || $error_type == 0) {
+    # CRITICAL: We MUST always return a valid error_type to prevent undefined value warnings
+    if ($@ || !defined $error_type) {
         $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
         $error_message = "Unable to process error: " . ($@ || "Unknown error");
+        $is_recoverable_error = 0;
+    }
+    
+    # Ensure error_type is a valid numeric constant (not 0, not negative, not undefined)
+    # ERROR_GENERIC_LOGGED should be a positive integer
+    if (!defined $error_type || $error_type == 0 || $error_type !~ /^\d+$/ || $error_type < 0) {
+        $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
         $is_recoverable_error = 0;
     }
     
@@ -740,10 +748,12 @@ sub determine_error_type {
     # Ensure is_recoverable_error is defined (should be 0 or 1)
     $is_recoverable_error = defined $is_recoverable_error ? ($is_recoverable_error ? 1 : 0) : 0;
     
-    # Final validation: ensure error_type is a valid constant
-    if ($error_type !~ /^\d+$/ || $error_type < 0) {
+    # FINAL CHECK: Double-check error_type is still valid before returning
+    # This is a safety net to prevent any possibility of returning undefined
+    if (!defined $error_type) {
         $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
         $is_recoverable_error = 0;
+        $error_message = "Error type was undefined - using generic error";
     }
     
     return ($error_type, $error_message, $is_recoverable_error);
@@ -773,13 +783,17 @@ sub is_recoverable_error {
     return 0 if !defined $actual_error_type || $actual_error_type == 0;
     
     # Call parent function with defined value
-    # Use eval to catch any warnings/errors from the parent function
-    my $result;
-    {
+    # Use eval and warning suppression to catch any issues from the parent function
+    my $result = 0;
+    eval {
         local $SIG{__WARN__} = sub {};  # Suppress warnings
-        $result = Cpanel::NameServer::Remote::is_recoverable_error($actual_error_type);
-    }
+        # Only call parent if we have a valid, defined error_type
+        if (defined $actual_error_type && $actual_error_type =~ /^\d+$/ && $actual_error_type > 0) {
+            $result = Cpanel::NameServer::Remote::is_recoverable_error($actual_error_type);
+        }
+    };
     
+    # If eval failed or result is undefined, return 0 (not recoverable)
     return defined $result ? $result : 0;
 }
 
