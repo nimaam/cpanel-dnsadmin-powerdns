@@ -26,11 +26,15 @@ sub new {
     # Support both "apikey" and "pass" for backward compatibility
     my $apikey = $OPTS{"apikey"} || $OPTS{"pass"} || "";
 
+    # Get host from OPTS if provided, otherwise use parsed host
+    my $dnspeer = $OPTS{"host"} || $host || "";
+
     my $self = bless(
         {
             "api_url" => $api_url,
             "base_url" => $base_url,
-            "host" => $host,
+            "host" => $dnspeer,
+            "name" => $dnspeer,  # Required by parent class
             "apikey" => $apikey,
             "pass" => $apikey,  # Keep for backward compatibility
             "server_name" => "localhost",
@@ -39,6 +43,9 @@ sub new {
             "dnsrole" => $OPTS{"dnsrole"},
             "local_timeout" => $OPTS{"local_timeout"} || 30,
             "remote_timeout" => $OPTS{"remote_timeout"} || 30,
+            "queue_callback" => $OPTS{"queue_callback"},  # Required by parent class
+            "output_callback" => $OPTS{"output_callback"},  # Required by parent class
+            "update_type" => $OPTS{"update_type"},
         },
         $class
     );
@@ -140,12 +147,13 @@ sub _powerdns_api_request {
     }
 
     if (!$is_success) {
-        $self->{"error"} = "PowerDNS API error: $error";
+        # Set error in publicapi->error so parent class _check_action can detect it
+        $self->{"publicapi"}->{"error"} = "PowerDNS API error: $error";
         if (ref($page) && $$page) {
             eval {
                 my $error_data = Cpanel::JSON::Load($$page);
                 if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
-                    $self->{"error"} .= " - " . $error_data->{"error"};
+                    $self->{"publicapi"}->{"error"} .= " - " . $error_data->{"error"};
                 }
             };
         }
@@ -229,7 +237,7 @@ sub addzoneconf {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     chomp($dataref->{"zone"});
-    my $zone = $dataref->{"zone"} || return $self->_check_action("add zone $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    my $zone = $dataref->{"zone"} || return $self->_check_action("add zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
     # Create zone in PowerDNS
     my $zone_data = {
@@ -274,7 +282,7 @@ sub getzone {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     chomp($dataref->{"zone"});
-    my $zone = $dataref->{"zone"} || return $self->_check_action("get zone $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    my $zone = $dataref->{"zone"} || return $self->_check_action("get zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
     my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$zone");
 
@@ -351,7 +359,7 @@ sub zoneexists {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     chomp($dataref->{"zone"});
-    my $zone = $dataref->{"zone"} || return $self->_check_action("check if zone $zone exists", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    my $zone = $dataref->{"zone"} || return $self->_check_action("check if zone exists", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
     my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$zone");
 
@@ -413,7 +421,7 @@ sub version {
 
     # Fallback to PublicAPI version
     my $version = $self->{"publicapi"}->version();
-    $self->{"error"} = $self->{"publicapi"}->{"error"} if $self->{"publicapi"}->{"error"};
+    # Error is already in publicapi->error, no need to copy
     return $version || "1.0";
 }
 
@@ -422,7 +430,7 @@ sub quickzoneadd {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     chomp($dataref->{"zone"});
-    my $zone = $dataref->{"zone"} || return $self->_check_action("quick add zone $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    my $zone = $dataref->{"zone"} || return $self->_check_action("quick add zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
     # Create zone in PowerDNS
     my $zone_data = {
@@ -446,7 +454,7 @@ sub removezone {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     chomp($dataref->{"zone"});
-    my $zone = $dataref->{"zone"} || return $self->_check_action("remove zone $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    my $zone = $dataref->{"zone"} || return $self->_check_action("remove zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
     my $result = $self->_powerdns_api_request("DELETE", "/servers/$self->{'server_name'}/zones/$zone");
 
@@ -486,7 +494,7 @@ sub savezone {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     chomp($dataref->{"zone"});
-    my $zone = $dataref->{"zone"} || return $self->_check_action("save zone $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    my $zone = $dataref->{"zone"} || return $self->_check_action("save zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
     # Parse the zone data from rawdata
     # This is a simplified implementation - may need adjustment based on actual format
@@ -523,7 +531,7 @@ sub synckeys {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     chomp($dataref->{"zone"});
-    my $zone = $dataref->{"zone"} || return $self->_check_action("sync keys: $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    my $zone = $dataref->{"zone"} || return $self->_check_action("sync keys", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
     # Remove dnsuniqid from rawdata
     $rawdata =~ s/^dnsuniqid=[^&]+&//g;
@@ -541,7 +549,7 @@ sub revokekeys {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
     chomp($dataref->{"zone"});
-    my $zone = $dataref->{"zone"} || return $self->_check_action("revoke keys: $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    my $zone = $dataref->{"zone"} || return $self->_check_action("revoke keys", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
     # Remove dnsuniqid from rawdata
     $rawdata =~ s/^dnsuniqid=[^&]+&//g;
