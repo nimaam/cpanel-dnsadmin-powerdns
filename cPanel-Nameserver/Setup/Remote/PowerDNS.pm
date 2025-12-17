@@ -60,60 +60,95 @@ sub setup {
     }
 
     # Test API connection before saving configuration
-    # Try to use Cpanel::HTTP::Client, but fall back to curl if it fails
+    # Try multiple endpoints to ensure connection works
     my $connection_test_passed = 0;
     my $connection_error       = "";
+    my @test_endpoints = (
+        "$base_url/servers/localhost",
+        "$base_url/servers",
+    );
 
-    eval {
-        require Cpanel::HTTP::Client;
-        my $test_url = "$base_url/servers/localhost";
-        my $ua = Cpanel::HTTP::Client->new(
-            timeout    => 10,
-            keep_alive => 1,
-        );
+    foreach my $test_url (@test_endpoints) {
+        last if $connection_test_passed;
+        
+        eval {
+            require Cpanel::HTTP::Client;
+            my $ua = Cpanel::HTTP::Client->new(
+                timeout    => 10,
+                keep_alive => 1,
+            );
 
-        my $resp = $ua->get(
-            $test_url,
-            {
-                headers => {
-                    "X-API-Key"     => $apikey,
-                    "Content-Type"  => "application/json",
-                    "Accept"        => "application/json",
+            my $resp = $ua->get(
+                $test_url,
+                {
+                    headers => {
+                        "X-API-Key"     => $apikey,
+                        "Content-Type"  => "application/json",
+                        "Accept"        => "application/json",
+                    }
+                }
+            );
+
+            if ($resp && $resp->{"success"}) {
+                $connection_test_passed = 1;
+                $connection_error = "";
+                last;
+            }
+            elsif ($resp) {
+                my $status = $resp->{"status"} || "unknown";
+                # 401/403 are auth errors, but 404 might mean wrong endpoint - try next
+                if ($status == 401 || $status == 403) {
+                    $connection_error = "Authentication failed (HTTP $status). Please verify your API key is correct.";
+                }
+                elsif ($status == 404 && !$connection_error) {
+                    # 404 might mean wrong endpoint, try next endpoint
+                    next;
+                }
+                elsif (!$connection_error) {
+                    my $reason = $resp->{"reason"} || "connection failed";
+                    $connection_error = "Failed to connect to PowerDNS API: HTTP $status - $reason";
+                    
+                    if ($resp->{"content"}) {
+                        eval {
+                            my $error_data = Cpanel::JSON::Load($resp->{"content"});
+                            if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
+                                $connection_error .= " - " . $error_data->{"error"};
+                            }
+                        };
+                    }
                 }
             }
-        );
-
-        if ($resp->{"success"}) {
-            $connection_test_passed = 1;
-        }
-        else {
-            $connection_error = "Failed to connect to PowerDNS API: " . ($resp->{"status"} || "unknown") . " - " . ($resp->{"reason"} || "connection failed");
-            if ($resp->{"content"}) {
-                eval {
-                    my $error_data = Cpanel::JSON::Load($resp->{"content"});
-                    if (ref($error_data) eq "HASH" && $error_data->{"error"}) {
-                        $connection_error .= " - " . $error_data->{"error"};
-                    }
-                };
+            else {
+                $connection_error = "Failed to get response from PowerDNS API" if !$connection_error;
             }
-        }
-    };
+        };
 
-    # If HTTP::Client failed to load or test failed, try curl as fallback
-    if (!$connection_test_passed && ($@ || $connection_error)) {
-        my $test_url = "$base_url/servers/localhost";
-        my $curl_cmd = "curl -s -w '\\nHTTP_CODE:%{http_code}' --max-time 10 -H 'X-API-Key: $apikey' -H 'Content-Type: application/json' '$test_url' 2>&1";
-        my $curl_output = `$curl_cmd`;
-        my $http_code = "";
-        if ($curl_output =~ /HTTP_CODE:(\d+)/) {
-            $http_code = $1;
-        }
+        # If HTTP::Client failed, try curl as fallback for this endpoint
+        if (!$connection_test_passed && $@) {
+            eval {
+                my $curl_cmd = "curl -s -w '\\nHTTP_CODE:%{http_code}' --max-time 10 -H 'X-API-Key: $apikey' -H 'Content-Type: application/json' -H 'Accept: application/json' '$test_url' 2>&1";
+                my $curl_output = `$curl_cmd`;
+                my $http_code = "";
+                if ($curl_output =~ /HTTP_CODE:(\d+)/) {
+                    $http_code = $1;
+                }
 
-        if ($http_code eq "200") {
-            $connection_test_passed = 1;
-        }
-        else {
-            $connection_error = "Failed to connect to PowerDNS API (HTTP $http_code). Please verify API URL and key are correct.";
+                if ($http_code eq "200") {
+                    $connection_test_passed = 1;
+                    $connection_error = "";
+                    last;
+                }
+                elsif ($http_code eq "401" || $http_code eq "403") {
+                    $connection_error = "Authentication failed (HTTP $http_code). Please verify your API key is correct.";
+                }
+                elsif ($http_code eq "404" && !$connection_error) {
+                    # Try next endpoint
+                    next;
+                }
+                elsif ($http_code && !$connection_error) {
+                    $connection_error = "Failed to connect to PowerDNS API (HTTP $http_code). Please verify API URL and key are correct.";
+                }
+            };
         }
     }
 
