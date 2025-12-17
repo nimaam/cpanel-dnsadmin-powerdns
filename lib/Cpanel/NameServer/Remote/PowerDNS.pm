@@ -639,8 +639,11 @@ sub synczones {
             );
             
             # Return immediately if recoverable error (will retry later)
-            # Note: is_recoverable_error is a function, not a method, so call it directly
-            return ($status, $statusmsg) if Cpanel::NameServer::Remote::is_recoverable_error($status);
+            # Only check if status is defined and not SUCCESS (SUCCESS is not an error type)
+            if (defined $status && $status != $Cpanel::NameServer::Constants::SUCCESS) {
+                # Note: is_recoverable_error is a function, not a method, so call it directly
+                return ($status, $statusmsg) if Cpanel::NameServer::Remote::is_recoverable_error($status);
+            }
         }
 
         # Decode zone data and save the zone
@@ -655,7 +658,11 @@ sub synczones {
         );
 
         # Return immediately if recoverable error (will retry later)
-        return ($status, $statusmsg) if Cpanel::NameServer::Remote::is_recoverable_error($status);
+        # Only check if status is defined and not SUCCESS (SUCCESS is not an error type)
+        if (defined $status && $status != $Cpanel::NameServer::Constants::SUCCESS) {
+            # Note: is_recoverable_error is a function, not a method, so call it directly
+            return ($status, $statusmsg) if Cpanel::NameServer::Remote::is_recoverable_error($status);
+        }
     }
 
     return ($Cpanel::NameServer::Constants::SUCCESS, 'OK');
