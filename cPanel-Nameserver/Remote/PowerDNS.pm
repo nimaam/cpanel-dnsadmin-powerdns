@@ -108,6 +108,21 @@ sub _get_api_base_url {
     return $self->{"base_url"} || "";
 }
 
+# Helper method to normalize zone name for PowerDNS API
+# PowerDNS requires zone names to have a trailing dot
+sub _normalize_zone_name {
+    my ($self, $zone) = @_;
+    return "" if !$zone;
+    
+    $zone =~ s/^\s+|\s+$//g;  # Trim whitespace
+    return "" if !$zone;
+    
+    # Add trailing dot if not present
+    $zone .= "." unless $zone =~ /\.$/;
+    
+    return $zone;
+}
+
 # Helper method to make PowerDNS API requests
 sub _powerdns_api_request {
     my ($self, $method, $endpoint, $data) = @_;
@@ -236,12 +251,15 @@ sub _powerdns_to_cpanel_zone {
 sub addzoneconf {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    chomp($dataref->{"zone"});
+    chomp($dataref->{"zone"}) if defined $dataref->{"zone"};
     my $zone = $dataref->{"zone"} || return $self->_check_action("add zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+
+    # Normalize zone name for PowerDNS API (add trailing dot if needed)
+    my $normalized_zone = $self->_normalize_zone_name($zone);
 
     # Create zone in PowerDNS
     my $zone_data = {
-        "name" => $zone,
+        "name" => $normalized_zone,
         "kind" => "Native",
         "dnssec" => 0,
         "nameservers" => [],
@@ -281,10 +299,12 @@ sub getallzones {
 sub getzone {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    chomp($dataref->{"zone"});
+    chomp($dataref->{"zone"}) if defined $dataref->{"zone"};
     my $zone = $dataref->{"zone"} || return $self->_check_action("get zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
-    my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$zone");
+    # Normalize zone name for PowerDNS API (add trailing dot if needed)
+    my $normalized_zone = $self->_normalize_zone_name($zone);
+    my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$normalized_zone");
 
     if (!$powerdns_zone || ref($powerdns_zone) ne "HASH") {
         return $self->_check_action("get zone $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
@@ -317,7 +337,9 @@ sub getzones {
         next if !$zone;
 
         $count++;
-        my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$zone");
+        # Normalize zone name for PowerDNS API (add trailing dot if needed)
+        my $normalized_zone = $self->_normalize_zone_name($zone);
+        my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$normalized_zone");
 
         if ($powerdns_zone && ref($powerdns_zone) eq "HASH") {
             my $cpanel_zone = $self->_powerdns_to_cpanel_zone($zone, $powerdns_zone);
@@ -359,10 +381,12 @@ sub getzonelist {
 sub zoneexists {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    chomp($dataref->{"zone"});
+    chomp($dataref->{"zone"}) if defined $dataref->{"zone"};
     my $zone = $dataref->{"zone"} || return $self->_check_action("check if zone exists", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
-    my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$zone");
+    # Normalize zone name for PowerDNS API (add trailing dot if needed)
+    my $normalized_zone = $self->_normalize_zone_name($zone);
+    my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$normalized_zone");
 
     my $exists = ($powerdns_zone && ref($powerdns_zone) eq "HASH") ? 1 : 0;
     $self->output($exists);
@@ -430,12 +454,15 @@ sub version {
 sub quickzoneadd {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    chomp($dataref->{"zone"});
+    chomp($dataref->{"zone"}) if defined $dataref->{"zone"};
     my $zone = $dataref->{"zone"} || return $self->_check_action("quick add zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+
+    # Normalize zone name for PowerDNS API (add trailing dot if needed)
+    my $normalized_zone = $self->_normalize_zone_name($zone);
 
     # Create zone in PowerDNS
     my $zone_data = {
-        "name" => $zone,
+        "name" => $normalized_zone,
         "kind" => "Native",
         "dnssec" => 0,
         "nameservers" => [],
@@ -454,10 +481,12 @@ sub quickzoneadd {
 sub removezone {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    chomp($dataref->{"zone"});
+    chomp($dataref->{"zone"}) if defined $dataref->{"zone"};
     my $zone = $dataref->{"zone"} || return $self->_check_action("remove zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
 
-    my $result = $self->_powerdns_api_request("DELETE", "/servers/$self->{'server_name'}/zones/$zone");
+    # Normalize zone name for PowerDNS API (add trailing dot if needed)
+    my $normalized_zone = $self->_normalize_zone_name($zone);
+    my $result = $self->_powerdns_api_request("DELETE", "/servers/$self->{'server_name'}/zones/$normalized_zone");
 
     if (!$result) {
         return $self->_check_action("remove zone $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
@@ -479,7 +508,9 @@ sub removezones {
         $zone =~ s/^\s+|\s+$//g;
         next if !$zone;
 
-        my $result = $self->_powerdns_api_request("DELETE", "/servers/$self->{'server_name'}/zones/$zone");
+        # Normalize zone name for PowerDNS API (add trailing dot if needed)
+        my $normalized_zone = $self->_normalize_zone_name($zone);
+        my $result = $self->_powerdns_api_request("DELETE", "/servers/$self->{'server_name'}/zones/$normalized_zone");
         $success = 0 if !$result;
     }
 
@@ -494,8 +525,11 @@ sub removezones {
 sub savezone {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    chomp($dataref->{"zone"});
+    chomp($dataref->{"zone"}) if defined $dataref->{"zone"};
     my $zone = $dataref->{"zone"} || return $self->_check_action("save zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+
+    # Normalize zone name for PowerDNS API (add trailing dot if needed)
+    my $normalized_zone = $self->_normalize_zone_name($zone);
 
     # Parse the zone data from rawdata
     # This is a simplified implementation - may need adjustment based on actual format
@@ -509,13 +543,32 @@ sub savezone {
         "rrsets" => $records,
     };
 
-    my $result = $self->_powerdns_api_request("PATCH", "/servers/$self->{'server_name'}/zones/$zone", $update_data);
+    my $result = $self->_powerdns_api_request("PATCH", "/servers/$self->{'server_name'}/zones/$normalized_zone", $update_data);
 
     if (!$result) {
         return $self->_check_action("save zone $zone", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
     }
 
     return $self->_check_action("save zone $zone", $Cpanel::NameServer::Constants::QUEUE);
+}
+
+# Create methods for BIND-specific operations (not needed for PowerDNS, but required by dnsadmin)
+sub reloadbind {
+    my ($self) = @_;
+    $self->output("No reload needed on $self->{'name'}\n");
+    return ($Cpanel::NameServer::Constants::SUCCESS, 'OK');
+}
+
+sub reloadzones {
+    my ($self) = @_;
+    $self->output("No reload needed on $self->{'name'}\n");
+    return ($Cpanel::NameServer::Constants::SUCCESS, 'OK');
+}
+
+sub reconfigbind {
+    my ($self) = @_;
+    $self->output("No reconfig needed on $self->{'name'}\n");
+    return ($Cpanel::NameServer::Constants::SUCCESS, 'OK');
 }
 
 # Create a method to synchronize zones.
@@ -557,14 +610,17 @@ sub synczones {
         # Decode the zone name
         $zone = Cpanel::Encoder::URI::uri_decode_str($zone);
         
+        # Normalize zone name for PowerDNS API (add trailing dot if needed)
+        my $normalized_zone = $self->_normalize_zone_name($zone);
+        
         # Check if zone exists in PowerDNS
-        my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$zone");
+        my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$normalized_zone");
         
         # If zone doesn't exist, create it
         if (!$powerdns_zone || ref($powerdns_zone) ne "HASH") {
             ($status, $statusmsg) = $self->addzoneconf(
                 $unique_dns_request_id . '_' . ++$count,
-                { 'zone' => $zone }
+                { 'zone' => $zone }  # Use original zone name (addzoneconf will normalize)
             );
             
             # Return immediately if recoverable error (will retry later)
