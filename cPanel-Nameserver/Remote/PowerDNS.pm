@@ -300,8 +300,9 @@ sub getzone {
 sub getzones {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    chomp($dataref->{"zone"});
-    chomp($dataref->{"zones"});
+    # Guard against undef keys to avoid "Use of uninitialized value in chomp" warnings
+    chomp($dataref->{"zone"})  if defined $dataref->{"zone"};
+    chomp($dataref->{"zones"}) if defined $dataref->{"zones"};
 
     my $zones_list = $dataref->{"zones"} || $dataref->{"zone"} || "";
     my @zones = split(/,/, $zones_list);
