@@ -519,12 +519,74 @@ sub savezone {
 }
 
 # Create a method to synchronize zones.
+# This implementation follows the same pattern as SoftLayer and VPSNET:
+# 1. Parse rawdata containing cpdnszone- entries with zone data
+# 2. For each zone: check if exists, create if needed, then save zone data
 sub synczones {
     my ($self, $unique_dns_request_id, $dataref, $rawdata) = @_;
 
-    # PowerDNS handles zone synchronization internally
-    # This method may need to trigger a zone transfer or notify
-    return $self->_check_action("sync zones", $Cpanel::NameServer::Constants::QUEUE);
+    # Strip dnsuniqid from rawdata (inherited from parent class)
+    $rawdata = $self->_strip_dnsuniqid($rawdata);
+
+    # Parse rawdata into hash: cpdnszone-<encoded_zone> => <encoded_zone_data>
+    my %CZONETABLE = map { ( split( /=/, $_, 2 ) )[ 0, 1 ] } split( /\&/, $rawdata );
+    # Keep only cpdnszone- entries
+    delete @CZONETABLE{ grep( !/^cpdnszone-/, keys %CZONETABLE ) };
+
+    # Check if we have any zones to sync
+    if (!scalar keys %CZONETABLE) {
+        return $self->_check_action("sync zones", $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    }
+
+    # Allow longer timeout for bulk operations
+    local $self->{'ua'}->{'timeout'} = (
+        ( int( $self->{'local_timeout'} / 2 ) > $self->{'remote_timeout'} )
+            ? int( $self->{'local_timeout'} / 2 )
+            : $self->{'remote_timeout'}
+    );
+
+    my $zone;
+    my $count = 0;
+    my ($status, $statusmsg);
+
+    # Process each zone
+    foreach my $zonekey ( keys %CZONETABLE ) {
+        $zone = $zonekey;
+        $zone =~ s/^cpdnszone-//g;
+        
+        # Decode the zone name
+        $zone = Cpanel::Encoder::URI::uri_decode_str($zone);
+        
+        # Check if zone exists in PowerDNS
+        my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$zone");
+        
+        # If zone doesn't exist, create it
+        if (!$powerdns_zone || ref($powerdns_zone) ne "HASH") {
+            ($status, $statusmsg) = $self->addzoneconf(
+                $unique_dns_request_id . '_' . ++$count,
+                { 'zone' => $zone }
+            );
+            
+            # Return immediately if recoverable error (will retry later)
+            return ($status, $statusmsg) if $self->is_recoverable_error($status);
+        }
+
+        # Decode zone data and save the zone
+        my $decoded_zone_data = Cpanel::Encoder::URI::uri_decode_str($CZONETABLE{$zonekey});
+        
+        ($status, $statusmsg) = $self->savezone(
+            $unique_dns_request_id . '_' . ++$count,
+            {
+                'zone' => $zone,
+                'zonedata' => $decoded_zone_data
+            }
+        );
+
+        # Return immediately if recoverable error (will retry later)
+        return ($status, $statusmsg) if $self->is_recoverable_error($status);
+    }
+
+    return ($Cpanel::NameServer::Constants::SUCCESS, 'OK');
 }
 
 # Create a method that synchronizes DNSSEC keys in the DNS cluster.
