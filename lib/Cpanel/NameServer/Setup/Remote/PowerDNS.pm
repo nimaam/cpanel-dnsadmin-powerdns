@@ -29,7 +29,9 @@ sub setup {
         return (0, $error);
     }
 
-    if (!defined $OPTS{"user"}) {
+    # Support both "user" and "cluster_user" parameter names
+    my $user = $OPTS{"user"} || $OPTS{"cluster_user"} || $ENV{"REMOTE_USER"};
+    if (!defined $user || $user eq "") {
         my $error = "No user given";
         eval {
             require Cpanel::Logger;
@@ -57,7 +59,6 @@ sub setup {
         return (0, $error);
     }
 
-    my $user    = $OPTS{"user"};
     my $apikey  = $OPTS{"apikey"};
     my $api_url = $OPTS{"api_url"};
 
