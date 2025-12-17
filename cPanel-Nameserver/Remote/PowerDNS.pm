@@ -719,19 +719,32 @@ sub determine_error_type {
     # Ensure we have a valid error message
     $msg = $self->{'publicapi'}->{'error'} || $error_msg || "Unknown error" if !$msg || !length $msg;
 
-    my ($error_type, $error_message, $is_recoverable_error) = $self->SUPER::determine_error_type($msg);
+    # Call parent determine_error_type with error handling
+    my ($error_type, $error_message, $is_recoverable_error);
+    eval {
+        ($error_type, $error_message, $is_recoverable_error) = $self->SUPER::determine_error_type($msg);
+    };
     
-    # Ensure we always return a valid error type (fallback to GENERIC if undefined)
-    if (!defined $error_type || $error_type == 0) {
+    # If parent call failed or returned invalid values, use defaults
+    if ($@ || !defined $error_type || $error_type == 0) {
         $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
+        $error_message = "Unable to process error: " . ($@ || "Unknown error");
         $is_recoverable_error = 0;
     }
     
-    # Ensure error_message is defined
-    $error_message = "Unknown error" if !defined $error_message || !length $error_message;
+    # Ensure error_message is defined and not empty
+    if (!defined $error_message || !length $error_message) {
+        $error_message = "Unknown error occurred on remote server [$self->{'name'}]";
+    }
     
-    # Ensure is_recoverable_error is defined
-    $is_recoverable_error = 0 if !defined $is_recoverable_error;
+    # Ensure is_recoverable_error is defined (should be 0 or 1)
+    $is_recoverable_error = defined $is_recoverable_error ? ($is_recoverable_error ? 1 : 0) : 0;
+    
+    # Final validation: ensure error_type is a valid constant
+    if ($error_type !~ /^\d+$/ || $error_type < 0) {
+        $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
+        $is_recoverable_error = 0;
+    }
     
     return ($error_type, $error_message, $is_recoverable_error);
 }
