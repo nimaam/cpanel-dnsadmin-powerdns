@@ -641,8 +641,8 @@ sub synczones {
             # Return immediately if recoverable error (will retry later)
             # Only check if status is defined and not SUCCESS (SUCCESS is not an error type)
             if (defined $status && $status != $Cpanel::NameServer::Constants::SUCCESS) {
-                # Note: is_recoverable_error is a function, not a method, so call it directly
-                return ($status, $statusmsg) if Cpanel::NameServer::Remote::is_recoverable_error($status);
+                # Use our overridden method which handles undefined values
+                return ($status, $statusmsg) if $self->is_recoverable_error($status);
             }
         }
 
@@ -660,8 +660,8 @@ sub synczones {
         # Return immediately if recoverable error (will retry later)
         # Only check if status is defined and not SUCCESS (SUCCESS is not an error type)
         if (defined $status && $status != $Cpanel::NameServer::Constants::SUCCESS) {
-            # Note: is_recoverable_error is a function, not a method, so call it directly
-            return ($status, $statusmsg) if Cpanel::NameServer::Remote::is_recoverable_error($status);
+            # Use our overridden method which handles undefined values
+            return ($status, $statusmsg) if $self->is_recoverable_error($status);
         }
     }
 
@@ -716,7 +716,34 @@ sub determine_error_type {
     # $self->{'publicapi'}->{error} into its final message.
     my $msg = defined $action_desc && length $action_desc ? $action_desc : $error_msg;
 
-    return $self->SUPER::determine_error_type($msg);
+    my ($error_type, $error_message, $is_recoverable_error) = $self->SUPER::determine_error_type($msg);
+    
+    # Ensure we always return a valid error type (fallback to GENERIC if undefined)
+    if (!defined $error_type) {
+        $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
+        $is_recoverable_error = 0;
+    }
+    
+    return ($error_type, $error_message, $is_recoverable_error);
+}
+
+# Override is_recoverable_error to handle undefined values gracefully
+# This prevents "Use of uninitialized value" warnings when error_type is undefined
+# When called as a method, Perl passes $self as first argument
+sub is_recoverable_error {
+    my ($self_or_error_type, $error_type) = @_;
+    
+    # If called as method ($self->is_recoverable_error($error_type)), 
+    # $self_or_error_type is $self and $error_type is the actual error type
+    # If called as function (is_recoverable_error($error_type)),
+    # $self_or_error_type is the error type
+    my $actual_error_type = defined $error_type ? $error_type : $self_or_error_type;
+    
+    # Return 0 (not recoverable) if error_type is undefined
+    return 0 if !defined $actual_error_type;
+    
+    # Call parent function with defined value
+    return Cpanel::NameServer::Remote::is_recoverable_error($actual_error_type);
 }
 
 1;
