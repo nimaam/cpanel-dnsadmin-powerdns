@@ -339,16 +339,31 @@ sub getzones {
         $count++;
         # Normalize zone name for PowerDNS API (add trailing dot if needed)
         my $normalized_zone = $self->_normalize_zone_name($zone);
+        
+        # Clear any previous errors before making the request
+        $self->{"publicapi"}->{"error"} = "";
+        
         my $powerdns_zone = $self->_powerdns_api_request("GET", "/servers/$self->{'server_name'}/zones/$normalized_zone");
 
+        # If zone exists, add it to output
+        # If zone doesn't exist (404), that's OK - just skip it (will be created during sync)
         if ($powerdns_zone && ref($powerdns_zone) eq "HASH") {
             my $cpanel_zone = $self->_powerdns_to_cpanel_zone($zone, $powerdns_zone);
             $output .= "cpdnszone-" . Cpanel::Encoder::URI::uri_encode_str($zone) . "=" . Cpanel::Encoder::URI::uri_encode_str($cpanel_zone) . "&";
+        } elsif ($self->{"publicapi"}->{"error"} && $self->{"publicapi"}->{"error"} =~ /404/) {
+            # Zone doesn't exist - this is OK, just clear the error and continue
+            $self->{"publicapi"}->{"error"} = "";
         }
     }
 
     $self->output($output);
-    return $self->_check_action("get zones " . join(",", @zones), $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    # Only report error if we have a non-404 error and no zones were retrieved
+    if ($self->{"publicapi"}->{"error"} && !$output) {
+        return $self->_check_action("get zones " . join(",", @zones), $Cpanel::NameServer::Constants::DO_NOT_QUEUE);
+    }
+    # Clear any remaining errors if we got at least some zones
+    $self->{"publicapi"}->{"error"} = "" if $output;
+    return ($Cpanel::NameServer::Constants::SUCCESS, "OK");
 }
 
 # Create a method to list all of the zones on the system.
