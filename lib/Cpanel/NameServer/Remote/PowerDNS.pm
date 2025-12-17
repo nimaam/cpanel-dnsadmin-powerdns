@@ -750,10 +750,24 @@ sub determine_error_type {
     
     # FINAL CHECK: Double-check error_type is still valid before returning
     # This is a safety net to prevent any possibility of returning undefined
+    # We check multiple times because the parent class's is_recoverable_error
+    # function will cause warnings if it receives undefined
     if (!defined $error_type) {
         $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
         $is_recoverable_error = 0;
         $error_message = "Error type was undefined - using generic error";
+    }
+    
+    # ABSOLUTE FINAL CHECK: Use a default constant value if somehow still undefined
+    # This should never happen, but we're being extra defensive
+    $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED if !defined $error_type;
+    $error_message = "Unknown error" if !defined $error_message;
+    $is_recoverable_error = 0 if !defined $is_recoverable_error;
+    
+    # Verify error_type is a number (not a string, not undefined)
+    if ($error_type !~ /^-?\d+$/) {
+        $error_type = $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED;
+        $is_recoverable_error = 0;
     }
     
     return ($error_type, $error_message, $is_recoverable_error);
