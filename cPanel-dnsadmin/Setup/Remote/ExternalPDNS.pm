@@ -91,6 +91,28 @@ sub setup {
         return 0, 'There was an error trying to connect to PowerDNS API, please verify your API URL, server ID, and API key';
     }
 
+    # Extract hostname and IP from API URL for cPanel display
+    my $hostname = '';
+    my $ip_address = '';
+    
+    if ( $api_url =~ /^https?:\/\/([^:\/]+)/ ) {
+        $hostname = $1;
+        
+        # Check if it's an IP address
+        if ( $hostname =~ /^\d+\.\d+\.\d+\.\d+$/ ) {
+            $ip_address = $hostname;
+        }
+        else {
+            # It's a hostname, try to resolve IP
+            use Cpanel::SocketIP;
+            eval {
+                $ip_address = Cpanel::SocketIP::_resolveIpAddress($hostname);
+            };
+            # If resolution fails, use hostname as fallback
+            $ip_address = $hostname if !$ip_address;
+        }
+    }
+
     my $safe_remote_user = $ENV{'REMOTE_USER'};
     $safe_remote_user =~ s/\///g;
     mkdir '/var/cpanel/cluster',                                  0700 if !-e '/var/cpanel/cluster';
@@ -101,6 +123,8 @@ sub setup {
         chmod 0600, '/var/cpanel/cluster/' . $safe_remote_user . '/config/externalpdns'
           or warn "Failed to secure permissions on cluster configuration: $!";
         print {$config_fh} "#version 2.0\n";
+        print {$config_fh} "host=$hostname\n";
+        print {$config_fh} "ip=$ip_address\n";
         print {$config_fh} "api_url=$api_url\n";
         print {$config_fh} "apikey=$apikey\n";
         print {$config_fh} "server_id=$server_id\n";
@@ -173,3 +197,4 @@ sub get_config {
 
 1;
 
+he
