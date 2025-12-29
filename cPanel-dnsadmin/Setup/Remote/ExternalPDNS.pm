@@ -210,5 +210,3 @@ sub get_config {
 }
 
 1;
-
-he
