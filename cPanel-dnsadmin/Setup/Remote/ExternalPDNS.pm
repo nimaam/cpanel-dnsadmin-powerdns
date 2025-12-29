@@ -171,16 +171,30 @@ sub get_config {
                 'type'        => 'radio',
                 'default'     => 'force',
                 'locale_text' => 'Method for handling NS lines',
+                'help'        => 'This setting controls how NS (nameserver) records are handled when zones are synchronized to PowerDNS. See descriptions below for each option.',
                 'options'     => [
-                    { value => 'force',   label => 'Force NS records to PowerDNS nameservers', },
-                    { value => 'ensure',  label => 'Ensure that PowerDNS nameservers are included', },
-                    { value => 'default', label => 'Do not modify', },
+                    {
+                        value       => 'force',
+                        label       => 'Force NS records to PowerDNS nameservers',
+                        description => 'This option will REPLACE all existing NS records in the zone with the PowerDNS nameservers you specify. All other NS records will be removed. Use this when you want all zones to use only your PowerDNS nameservers.',
+                    },
+                    {
+                        value       => 'ensure',
+                        label       => 'Ensure that PowerDNS nameservers are included',
+                        description => 'This option will ADD the PowerDNS nameservers to the zone if they are not already present, but will KEEP all existing NS records. Use this when you want to ensure your PowerDNS nameservers are included while preserving other nameserver records.',
+                    },
+                    {
+                        value       => 'default',
+                        label       => 'Do not modify',
+                        description => 'This option will NOT modify NS records at all. The zone will keep whatever NS records it currently has. Use this when you want full control over NS records or when they are managed elsewhere.',
+                    },
                 ],
             },
             {
                 'name'        => 'powerdns_ns',
                 'type'        => 'text',
                 'locale_text' => 'PowerDNS Nameservers (comma-separated, e.g., ns1.example.com,ns2.example.com)',
+                'help'        => 'Enter the nameservers that will be used for NS record management. Required when "Force" or "Ensure" mode is selected. Separate multiple nameservers with commas. Example: ns1.example.com,ns2.example.com',
             },
             {
                 'name'        => 'debug',
