@@ -34,7 +34,15 @@ my %TYPE_MAP = (
     'SRV'   => 'SRV',
 );
 
-my %DATA_MAP = ( 'SOA' => 'rname', 'A' => 'address', 'NS' => 'nsdname', 'CNAME' => 'cname', 'MX' => 'exchange', 'AAAA' => 'address', 'TXT' => 'txtdata' );
+my %DATA_MAP = (
+    'SOA'   => 'rname',
+    'A'     => 'address',
+    'NS'    => 'nsdname',
+    'CNAME' => 'cname',
+    'MX'    => 'exchange',
+    'AAAA'  => 'address',
+    'TXT'   => 'txtdata'
+);
 
 sub new {
     my ( $class, %OPTS ) = @_;
@@ -57,9 +65,11 @@ sub new {
     $self->{'output_callback'} = $OPTS{'output_callback'};
     $self->{'ns_config'}       = $OPTS{'ns_config'} || '';
     $self->{'powerdns_ns'}     = $OPTS{'powerdns_ns'} || '';
-    $self->{'debug'}           = $OPTS{'debug'}     || 0;
-    $self->{'pdns_log'}        = Cpanel::Logger->new( { 'alternate_logfile' => '/usr/local/cpanel/logs/dnsadmin_externalpdns_log' } );
-    $self->{'ua'}              = Cpanel::HTTP::Client->new(
+    $self->{'debug'}           = $OPTS{'debug'} || 0;
+
+    $self->{'pdns_log'} = Cpanel::Logger->new( { 'alternate_logfile' => '/usr/local/cpanel/logs/dnsadmin_externalpdns_log' } );
+
+    $self->{'ua'} = Cpanel::HTTP::Client->new(
         timeout    => $remote_timeout,
         keep_alive => 1,
     );
@@ -67,7 +77,6 @@ sub new {
     # Ensure API URL doesn't have trailing slash
     $self->{'api_url'} =~ s/\/$//;
 
-    # Log initialization
     $self->{'pdns_log'}->info( "ExternalPDNS module initialized for host: $dnspeer, API URL: $api_url, Server ID: $server_id" );
 
     return bless $self, $class;
@@ -79,14 +88,11 @@ sub _exec_json {
     my $method   = shift;
     my $formdata = shift;
 
-    # Build full URL
     my $url = $uri;
     if ( $uri !~ /^https?:\/\// ) {
-        # Relative path - prepend api_url
         $url = $self->{'api_url'} . $uri;
     }
 
-    # Log all requests (comprehensive logging as requested)
     $self->{'pdns_log'}->info('---');
     $self->{'pdns_log'}->info("$method $url");
     $self->{'pdns_log'}->info("FORMDATA: $formdata") if defined $formdata;
@@ -96,22 +102,22 @@ sub _exec_json {
         $url,
         {
             headers => {
-                'Accept'        => 'application/json',
-                'Content-Type'  => 'application/json',
-                'X-API-Key'     => $self->{'apikey'},
+                'Accept'       => 'application/json',
+                'Content-Type' => 'application/json',
+                'X-API-Key'    => $self->{'apikey'},
             },
             ( defined $formdata ? ( content => $formdata ) : () )
         }
     );
+
     my ( $is_success, $page ) = ( $resp->{success}, \$resp->{content} );
     my $error = $is_success ? '' : "$resp->{status} $resp->{reason}";
     $self->{'publicapi'}{'error'} = $error;
 
-    # Always log response (comprehensive logging)
     $self->{'pdns_log'}->info("STATUS: " . ( $is_success ? 'SUCCESS' : 'FAILED' ) );
     $self->{'pdns_log'}->info("ERROR: $error") if $error;
+
     my $logged_page = ref $page ? $$page : $page;
-    # Limit logged response to first 2000 chars to avoid huge logs
     if ( length($logged_page) > 2000 ) {
         $self->{'pdns_log'}->info( "RESPONSE: " . substr( $logged_page, 0, 2000 ) . "... (truncated)" );
     }
@@ -125,8 +131,24 @@ sub _exec_json {
 sub _get_zone_fqdn {
     my ( $self, $zone ) = @_;
     my $zone_fqdn = $zone;
+    $zone_fqdn =~ s/\s+//g;
     $zone_fqdn .= '.' unless $zone_fqdn =~ /\.$/;
-    return $zone_fqdn;
+    return lc($zone_fqdn);
+}
+
+sub _ensure_fqdn_dot {
+    my ( $self, $name ) = @_;
+    return $name if !defined $name || $name eq '';
+    $name =~ s/\s+//g;
+    $name = lc($name);
+    $name .= '.' unless $name =~ /\.$/;
+    return $name;
+}
+
+sub _rrkey {
+    my ( $self, $name, $type ) = @_;
+    $name = $self->_ensure_fqdn_dot($name);
+    return "$name|$type";
 }
 
 sub _get_zone_id {
@@ -134,12 +156,10 @@ sub _get_zone_id {
 
     my $zone_fqdn = $self->_get_zone_fqdn($zone);
 
-    # Check cache first
     if ( exists $self->{'ZONE_INFO'}->{$zone} ) {
         return $zone_fqdn;
     }
 
-    # Try to fetch zone to verify it exists
     my ( $status, $statusmsg, $page_ref ) = $self->_exec_json( "/api/v1/servers/$self->{'server_id'}/zones/$zone_fqdn", 'GET' );
 
     if ( $status && $page_ref && $$page_ref ) {
@@ -165,7 +185,7 @@ sub _fetch_domain_info {
             foreach my $zone_obj ( @{$data} ) {
                 if ( ref $zone_obj eq 'HASH' && exists $zone_obj->{'name'} ) {
                     my $zone_name = $zone_obj->{'name'};
-                    $zone_name =~ s/\.$//;    # Remove trailing dot for cache key
+                    $zone_name =~ s/\.$//;
                     $self->{'ZONE_INFO'}->{$zone_name} = $zone_obj;
                 }
             }
@@ -275,10 +295,12 @@ sub savezone {
 
     my $zonefile_obj;
     eval { $zonefile_obj = Cpanel::ZoneFile->new( 'domain' => $dataref->{'zone'}, 'text' => $dataref->{'zonedata'} ); };
-    return ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to save the zone $dataref->{'zone'} on the remote server [$self->{'name'}] (Could not parse zonefile)" )                            if !$zonefile_obj;
-    return ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to save the zone $dataref->{'zone'} on the remote server [$self->{'name'}] (Could not parse zonefile - $zonefile_obj->{'error'})" ) if $zonefile_obj->{'error'};
+    return ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to save the zone $dataref->{'zone'} on the remote server [$self->{'name'}] (Could not parse zonefile)" )
+      if !$zonefile_obj;
+    return ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to save the zone $dataref->{'zone'} on the remote server [$self->{'name'}] (Could not parse zonefile - $zonefile_obj->{'error'})" )
+      if $zonefile_obj->{'error'};
 
-    # Check if zone exists, create if not
+    # Ensure zone exists
     my $zone_id = $self->_get_zone_id( $dataref->{'zone'} );
     if ( !$zone_id ) {
         $self->{'pdns_log'}->info("Zone $dataref->{'zone'} does not exist, creating it" );
@@ -291,10 +313,12 @@ sub savezone {
             my @check_action_results = $self->_check_action( "save the zone $dataref->{'zone'}", $Cpanel::NameServer::Constants::QUEUE );
             return (@check_action_results) if $check_action_results[$Cpanel::NameServer::Constants::CHECK_ACTION_POSITION_STATUS] != $Cpanel::NameServer::Constants::SUCCESS;
         }
-        return ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to save the zone(s): $dataref->{'zone'} to the remote server [$self->{'name'}] (Could not fetch zone id : $self->{'publicapi'}->{'error'})" ) if !$zone_id;
+
+        return ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to save the zone(s): $dataref->{'zone'} to the remote server [$self->{'name'}] (Could not fetch zone id : $self->{'publicapi'}->{'error'})" )
+          if !$zone_id;
     }
 
-    # Convert zonefile records to PowerDNS RRsets format
+    # --- Build desired rrsets from cPanel zonefile ---
     my %rrsets_by_key = ();    # Key: "name|type"
 
     foreach my $record ( @{ $zonefile_obj->{'dnszone'} } ) {
@@ -304,23 +328,21 @@ sub savezone {
         }
 
         my $name = $record->{'name'};
-        # Convert to FQDN
+
+        # Convert name to FQDN (trailing dot)
         if ( $name !~ /\.$/ ) {
             if ( $name eq '@' || $name eq $dataref->{'zone'} ) {
                 $name = $zone_fqdn;
             }
             else {
-                $name = lc( $name . '.' . $zone_fqdn );
+                $name = $name . '.' . $zone_fqdn;
             }
         }
-        else {
-            $name = lc($name);
-        }
+        $name = $self->_ensure_fqdn_dot($name);
 
         my $type = $TYPE_MAP{ $record->{'type'} };
-        my $key  = "$name|$type";
+        my $key  = $self->_rrkey( $name, $type );
 
-        # Initialize RRset if not exists
         if ( !exists $rrsets_by_key{$key} ) {
             $rrsets_by_key{$key} = {
                 'name'    => $name,
@@ -330,56 +352,60 @@ sub savezone {
             };
         }
 
-        # Build record content based on type
         my $content = '';
         if ( $record->{'type'} eq 'MX' ) {
-            $content = $record->{'preference'} . ' ' . $record->{'exchange'};
-            $content .= '.' unless $content =~ /\.$/;
+            my $ex = $record->{'exchange'};
+            $ex = $zone_fqdn if !defined $ex || $ex eq '' || $ex eq '@' || $ex eq $dataref->{'zone'};
+            $ex = $self->_ensure_fqdn_dot($ex);
+            $content = $record->{'preference'} . ' ' . $ex;
         }
         elsif ( $record->{'type'} eq 'SRV' ) {
-            $content = $record->{'priority'} . ' ' . $record->{'weight'} . ' ' . $record->{'port'} . ' ' . $record->{'target'};
-            $content .= '.' unless $content =~ /\.$/;
+            my $tgt = $record->{'target'} || '';
+            $tgt = $self->_ensure_fqdn_dot($tgt) if $tgt ne '';
+            $content = $record->{'priority'} . ' ' . $record->{'weight'} . ' ' . $record->{'port'} . ' ' . $tgt;
         }
         elsif ( $record->{'type'} eq 'TXT' ) {
             $content = $record->{'txtdata'};
         }
         elsif ( $record->{'type'} eq 'SOA' ) {
-            # SOA is special - single record
-            $content = $record->{'mname'} . '. ' . $record->{'rname'} . '. ' . $record->{'serial'} . ' ' . $record->{'refresh'} . ' ' . $record->{'retry'} . ' ' . $record->{'expire'} . ' ' . $record->{'minimum'};
+            my $m = $record->{'mname'} || '';
+            my $r = $record->{'rname'} || '';
+            $m = $self->_ensure_fqdn_dot($m) if $m ne '';
+            $r = $self->_ensure_fqdn_dot($r) if $r ne '';
+            $content = $m . ' ' . $r . ' ' . $record->{'serial'} . ' ' . $record->{'refresh'} . ' ' . $record->{'retry'} . ' ' . $record->{'expire'} . ' ' . $record->{'minimum'};
         }
         else {
             $content = $record->{ $DATA_MAP{ $record->{'type'} } };
-            # Add trailing dot for certain types
+
             if ( $record->{'type'} eq 'CNAME' || $record->{'type'} eq 'NS' ) {
-                $content .= '.' unless $content =~ /\.$/;
+                $content = $zone_fqdn if $content eq '@' || $content eq $dataref->{'zone'};
+                $content = $self->_ensure_fqdn_dot($content);
             }
         }
 
         push @{ $rrsets_by_key{$key}->{'records'} }, {
             'content'  => $content,
-            'disabled' => 0,
+            'disabled' => Cpanel::JSON::false(),
         };
     }
 
-    # Handle NS records based on ns_config (NS rewriting as requested)
+    # Handle NS records based on ns_config
     if ( $self->{'ns_config'} eq 'force' && $self->{'powerdns_ns'} ) {
         $self->{'pdns_log'}->info("NS config is 'force', replacing all NS records with PowerDNS nameservers" );
         my @powerdns_ns = map {
             my $ns = $_;
             $ns =~ s/^\s+|\s+$//g;
-            $ns .= '.' unless $ns =~ /\.$/;
+            $ns = $self->_ensure_fqdn_dot($ns);
             $ns;
         } split( /,/, $self->{'powerdns_ns'} );
 
-        # Remove existing NS records
-        delete $rrsets_by_key{"$zone_fqdn|NS"};
+        delete $rrsets_by_key{ $self->_rrkey( $zone_fqdn, 'NS' ) };
 
-        # Add PowerDNS nameservers
-        $rrsets_by_key{"$zone_fqdn|NS"} = {
+        $rrsets_by_key{ $self->_rrkey( $zone_fqdn, 'NS' ) } = {
             'name'    => $zone_fqdn,
             'type'    => 'NS',
             'ttl'     => 86400,
-            'records' => [ map { { 'content' => $_, 'disabled' => 0 } } @powerdns_ns ],
+            'records' => [ map { { 'content' => $_, 'disabled' => Cpanel::JSON::false() } } @powerdns_ns ],
         };
     }
     elsif ( $self->{'ns_config'} eq 'ensure' && $self->{'powerdns_ns'} ) {
@@ -387,13 +413,13 @@ sub savezone {
         my @powerdns_ns = map {
             my $ns = $_;
             $ns =~ s/^\s+|\s+$//g;
-            $ns .= '.' unless $ns =~ /\.$/;
+            $ns = $self->_ensure_fqdn_dot($ns);
             $ns;
         } split( /,/, $self->{'powerdns_ns'} );
 
-        # Ensure PowerDNS nameservers are present
-        if ( !exists $rrsets_by_key{"$zone_fqdn|NS"} ) {
-            $rrsets_by_key{"$zone_fqdn|NS"} = {
+        my $ns_key = $self->_rrkey( $zone_fqdn, 'NS' );
+        if ( !exists $rrsets_by_key{$ns_key} ) {
+            $rrsets_by_key{$ns_key} = {
                 'name'    => $zone_fqdn,
                 'type'    => 'NS',
                 'ttl'     => 86400,
@@ -401,37 +427,83 @@ sub savezone {
             };
         }
 
-        # Add missing nameservers
-        my %existing_ns = map { $_->{'content'} => 1 } @{ $rrsets_by_key{"$zone_fqdn|NS"}->{'records'} };
-
+        my %existing_ns = map { $_->{'content'} => 1 } @{ $rrsets_by_key{$ns_key}->{'records'} };
         foreach my $ns (@powerdns_ns) {
-            push @{ $rrsets_by_key{"$zone_fqdn|NS"}->{'records'} }, { 'content' => $ns, 'disabled' => 0 }
-                unless $existing_ns{$ns};
+            push @{ $rrsets_by_key{$ns_key}->{'records'} }, { 'content' => $ns, 'disabled' => Cpanel::JSON::false() }
+              unless $existing_ns{$ns};
         }
     }
     else {
         $self->{'pdns_log'}->info("NS config is 'default', not modifying NS records" );
     }
 
-    # Convert to array
+    # --- Fetch current rrsets from PDNS to detect deletions ---
+    my %existing_rr = ();
+    {
+        my ( $st, $msg, $page_ref ) = $self->_exec_json( "/api/v1/servers/$self->{'server_id'}/zones/$zone_fqdn", 'GET' );
+        if ( $st && $page_ref && $$page_ref ) {
+            my $z = Cpanel::JSON::Load($$page_ref);
+            if ( ref $z eq 'HASH' && ref $z->{'rrsets'} eq 'ARRAY' ) {
+                for my $rr ( @{ $z->{'rrsets'} } ) {
+                    next if !$rr->{'name'} || !$rr->{'type'};
+                    my $k = $self->_rrkey( $rr->{'name'}, $rr->{'type'} );
+                    $existing_rr{$k} = 1;
+                }
+            }
+        }
+    }
+
+    # Desired keys
+    my %desired_rr = map { $_ => 1 } keys %rrsets_by_key;
+
+    # Convert desired rrsets to array
     my @rrsets = values %rrsets_by_key;
 
-    # Build zone update payload
-    my $zone_update = {
-        'rrsets' => \@rrsets,
-    };
+    # Add DELETE rrsets for anything that exists in PDNS but not in desired
+    for my $k ( keys %existing_rr ) {
+        next if $desired_rr{$k};
 
-    my $json = Cpanel::JSON::Dump($zone_update);
+        my ( $n, $t ) = split( /\|/, $k, 2 );
 
-    # Update zone using PUT (replaces all rrsets)
-    my ( $status, $statusmsg, $page_ref ) = $self->_exec_json( "/api/v1/servers/$self->{'server_id'}/zones/$zone_fqdn", 'PUT', $json );
+        # Safety: don't delete apex NS/SOA from diff (unless you explicitly want it)
+        next if ( $n eq $zone_fqdn && ( $t eq 'NS' || $t eq 'SOA' ) );
+
+        push @rrsets,
+          {
+            name       => $n,
+            type       => $t,
+            changetype => 'DELETE',
+            records    => [],
+          };
+    }
+
+    # Ensure REPLACE changetype on desired rrsets
+    foreach my $rr (@rrsets) {
+        next if $rr->{'changetype'} && $rr->{'changetype'} eq 'DELETE';
+        $rr->{'changetype'} = 'REPLACE';
+        $rr->{'name'}       = $self->_ensure_fqdn_dot( $rr->{'name'} );
+    }
+
+    my $zone_update = { 'rrsets' => \@rrsets };
+    my $json        = Cpanel::JSON::Dump($zone_update);
+
+    # IMPORTANT: use PATCH for rrset updates
+    my ( $status, $statusmsg, $page_ref ) = $self->_exec_json(
+        "/api/v1/servers/$self->{'server_id'}/zones/$zone_fqdn",
+        'PATCH',
+        $json
+    );
 
     {
         my @check_action_results = $self->_check_action( "save the zone $dataref->{'zone'}", $Cpanel::NameServer::Constants::QUEUE );
         return (@check_action_results) if $check_action_results[$Cpanel::NameServer::Constants::CHECK_ACTION_POSITION_STATUS] != $Cpanel::NameServer::Constants::SUCCESS;
     }
 
-    return ( $status ? ( $Cpanel::NameServer::Constants::SUCCESS, 'OK' ) : ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to save zone $dataref->{'zone'}: $statusmsg" ) );
+    return (
+        $status
+        ? ( $Cpanel::NameServer::Constants::SUCCESS, 'OK' )
+        : ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to save zone $dataref->{'zone'}: $statusmsg" )
+    );
 }
 
 sub synczones {
@@ -476,11 +548,9 @@ sub quickzoneadd {
     $self->{'pdns_log'}->info("quickzoneadd called for zone: $dataref->{'zone'}" );
 
     my ( $addstatus, $addstatus_message ) = $self->addzoneconf( $unique_dns_request_id . '_1', $dataref );
-
     return ( $addstatus, $addstatus_message ) if !$addstatus;
 
     my ( $savestatus, $savestatus_message ) = $self->savezone( $unique_dns_request_id . '_2', $dataref );
-
     return ( $savestatus, $savestatus_message ) if !$savestatus;
 
     return ( $Cpanel::NameServer::Constants::SUCCESS, 'OK' );
@@ -494,25 +564,22 @@ sub addzoneconf {
 
     my $zone_fqdn = $self->_get_zone_fqdn( $dataref->{'zone'} );
 
-    # Parse PowerDNS nameservers from config
     my @nameservers = ();
     if ( $self->{'powerdns_ns'} ) {
         @nameservers = map {
             my $ns = $_;
             $ns =~ s/^\s+|\s+$//g;
-            $ns .= '.' unless $ns =~ /\.$/;
+            $ns = $self->_ensure_fqdn_dot($ns);
             $ns;
         } split( /,/, $self->{'powerdns_ns'} );
     }
 
-    # Build zone creation payload - MUST use Primary type
     my $zone_data = {
         'name'   => $zone_fqdn,
-        'kind'   => 'Primary',    # MUST be Primary for external PowerDNS
+        'kind'   => 'Primary',
         'rrsets' => [],
     };
 
-    # Add nameservers if provided
     if (@nameservers) {
         $zone_data->{'nameservers'} = \@nameservers;
         $self->{'pdns_log'}->info("Creating zone with nameservers: " . join( ',', @nameservers ) );
@@ -527,7 +594,6 @@ sub addzoneconf {
         return (@check_action_results) if $check_action_results[$Cpanel::NameServer::Constants::CHECK_ACTION_POSITION_STATUS] != $Cpanel::NameServer::Constants::SUCCESS;
     }
 
-    # Check if zone already exists (PowerDNS returns 422 for duplicate)
     if ( !$status && $statusmsg =~ /422|already exists/i ) {
         $self->{'pdns_log'}->info("Zone $dataref->{'zone'} already exists, returning success" );
         return ( $Cpanel::NameServer::Constants::SUCCESS, 'OK' );
@@ -540,7 +606,11 @@ sub addzoneconf {
         }
     }
 
-    return ( $status ? ( $Cpanel::NameServer::Constants::SUCCESS, 'OK' ) : ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to add zone $dataref->{'zone'}: $statusmsg" ) );
+    return (
+        $status
+        ? ( $Cpanel::NameServer::Constants::SUCCESS, 'OK' )
+        : ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to add zone $dataref->{'zone'}: $statusmsg" )
+    );
 }
 
 sub getzone {
@@ -573,31 +643,23 @@ sub _getzone {
     return ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to get the zone(s): $dataref->{'zone'} from the remote server [$self->{'name'}] ($statusmsg)" ) if !$status;
 
     my $zone_data = Cpanel::JSON::Load($$page_ref);
-
     if ( !$zone_data || ref $zone_data ne 'HASH' ) {
         return ( $Cpanel::NameServer::Constants::ERROR_GENERIC_LOGGED, __PACKAGE__ . ": Unable to get the zone $dataref->{'zone'} from the remote server [$self->{'name'}] (No zone data returned from remote server)" );
     }
 
-    # Convert PowerDNS rrsets back to zonefile format
     my $zone_text = '';
     my $soa_rrset = undef;
 
-    # Extract SOA first
     if ( exists $zone_data->{'rrsets'} && ref $zone_data->{'rrsets'} eq 'ARRAY' ) {
         foreach my $rrset ( @{ $zone_data->{'rrsets'} } ) {
-            if ( $rrset->{'type'} eq 'SOA' ) {
-                $soa_rrset = $rrset;
-                last;
-            }
+            if ( $rrset->{'type'} eq 'SOA' ) { $soa_rrset = $rrset; last; }
         }
 
-        # Write SOA record
         if ( $soa_rrset && exists $soa_rrset->{'records'} && @{ $soa_rrset->{'records'} } ) {
             my ( $mname, $rname, $serial, $refresh, $retry, $expire, $minimum ) = split( /\s+/, $soa_rrset->{'records'}->[0]->{'content'}, 7 );
             $zone_text .= join( "\t", $zone_fqdn, $soa_rrset->{'ttl'}, 'IN', 'SOA', "$mname $rname ($serial $refresh $retry $expire $minimum)" ) . "\n";
         }
 
-        # Write other records
         foreach my $rrset ( @{ $zone_data->{'rrsets'} } ) {
             next if $rrset->{'type'} eq 'SOA';
 
@@ -621,7 +683,6 @@ sub _getzone {
         }
     }
 
-    # Add version line
     my $update_time = time();
     if ( exists $zone_data->{'serial'} ) {
         $update_time = HTTP::Date::str2time( $zone_data->{'serial'} ) || time();
@@ -654,11 +715,7 @@ sub getzonelist {
     $self->{'pdns_log'}->info("getzonelist called" );
 
     if ( exists $self->{'ZONE_INFO'} || $self->_fetch_domain_info() ) {
-        my @zone_names = map {
-            my $name = $_;
-            $name =~ s/\.$//;    # Remove trailing dot for output
-            $name;
-        } keys %{ $self->{'ZONE_INFO'} };
+        my @zone_names = map { my $n = $_; $n =~ s/\.$//; $n } keys %{ $self->{'ZONE_INFO'} };
         $self->output( join( "\n", @zone_names ) );
     }
     else {
@@ -688,7 +745,6 @@ sub getips {
     my ($self) = @_;
     $self->{'pdns_log'}->info("getips called" );
 
-    # Try to get IPs from PowerDNS nameservers if configured
     if ( $self->{'powerdns_ns'} ) {
         use Cpanel::SocketIP;
         my @ips = ();
@@ -702,7 +758,6 @@ sub getips {
         }
     }
 
-    # Fallback: return empty
     $self->output("\n");
     return ( $Cpanel::NameServer::Constants::SUCCESS, 'OK' );
 }
@@ -712,11 +767,7 @@ sub getpath {
     $self->{'pdns_log'}->info("getpath called" );
 
     if ( $self->{'powerdns_ns'} ) {
-        my @ns_list = map {
-            my $ns = $_;
-            $ns =~ s/^\s+|\s+$//g;
-            $ns;
-        } split( /,/, $self->{'powerdns_ns'} );
+        my @ns_list = map { my $ns = $_; $ns =~ s/^\s+|\s+$//g; $ns } split( /,/, $self->{'powerdns_ns'} );
         $self->output( join( "\n", map { $self->{'name'} . ' ' . $_ } @ns_list ) . "\n" );
     }
     else {
@@ -725,9 +776,6 @@ sub getpath {
     return ( $Cpanel::NameServer::Constants::SUCCESS, 'OK' );
 }
 
-sub version {
-    return $VERSION;
-}
+sub version { return $VERSION; }
 
 1;
-
