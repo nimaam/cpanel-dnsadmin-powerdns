@@ -1,0 +1,26 @@
+# DNS Notify Agent Configuration File
+# This file configures the DNS Notify Agent that listens for NOTIFY messages
+# from external PowerDNS servers and syncs zones to cPanel.
+
+# IP address to bind to (use specific IP, not 0.0.0.0 for production)
+# Example: bind_ip = 192.168.1.100
+bind_ip = 0.0.0.0
+
+# Port to listen on (default: 53)
+port = 53
+
+# Log file path
+log_file = /usr/local/cpanel/logs/dns_notify_agent.log
+
+# PID file path
+pid_file = /var/run/dns_notify_agent.pid
+
+# Allowed zones (optional)
+# If not specified, all zones are allowed
+# Supports wildcards (e.g., *.example.com)
+# Multiple zones can be specified, one per line
+# allowed_zone = example.com
+# allowed_zone = test.com
+# allowed_zone = *.example.com
+
+

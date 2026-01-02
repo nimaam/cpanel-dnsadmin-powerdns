@@ -1,15 +1,35 @@
-# External PDNS Module for cPanel dnsadmin
+# External PDNS Module and DNS Notify Agent for cPanel
 
-This module provides integration between cPanel's dnsadmin system and external PowerDNS Authoritative Server (version 4.8+) via the PowerDNS HTTP API.
+This package provides two components for integrating cPanel with external PowerDNS Authoritative Server (version 4.8+):
 
-## Features
+1. **dnsadmin Module**: Syncs zones from cPanel to external PowerDNS via HTTP API
+2. **DNS Notify Agent**: Receives NOTIFY messages from PowerDNS and syncs zones back to cPanel
 
+## Components
+
+### 1. External PDNS dnsadmin Module
+
+The dnsadmin module provides integration between cPanel's dnsadmin system and external PowerDNS via the PowerDNS HTTP API.
+
+**Features:**
 - **Full DNS Zone Management**: Create, update, delete, and retrieve DNS zones
 - **Primary Zone Type**: Automatically sets zones as Primary type (required for external PowerDNS)
 - **NS Record Rewriting**: Configurable nameserver record handling (force/ensure/default)
 - **Comprehensive Logging**: All operations logged to `/usr/local/cpanel/logs/dnsadmin_externalpdns_log`
 - **Error Handling**: Robust error handling with automatic retry queuing
 - **All Record Types**: Supports SOA, A, AAAA, CNAME, MX, NS, TXT, SRV, PTR
+
+### 2. DNS Notify Agent
+
+The DNS Notify Agent listens on port 53 (UDP/TCP) for DNS NOTIFY messages from external PowerDNS servers. When a zone is updated on PowerDNS, it automatically syncs the zone back to cPanel.
+
+**Features:**
+- **DNS NOTIFY Support**: Listens for and processes DNS NOTIFY messages
+- **UDP and TCP Support**: Handles both UDP and TCP DNS messages
+- **Zone Filtering**: Optional zone allowlist for security
+- **Automatic Zone Sync**: Automatically syncs zones when NOTIFY is received
+- **Systemd Integration**: Runs as a systemd service
+- **Comprehensive Logging**: All operations logged to `/usr/local/cpanel/logs/dns_notify_agent.log`
 
 ## Requirements
 
@@ -30,6 +50,10 @@ cd cpanel-dnsadmin-powerdns
 # Run installation script (as root)
 sudo bash install.sh
 ```
+
+This will install both:
+- The dnsadmin module (for syncing cPanel → PowerDNS)
+- The DNS Notify Agent (for syncing PowerDNS → cPanel)
 
 ### Manual Install
 
@@ -204,6 +228,49 @@ For issues or questions:
 ## License
 
 This code is subject to the cPanel license. Unauthorized copying is prohibited.
+
+## Architecture
+
+```
+┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
+│   cPanel DNS    │────────▶│  External PDNS   │────────▶│  DNS Notify     │
+│   (dnsadmin)    │  HTTP   │  (Master)        │  NOTIFY │  Agent          │
+│                 │  API    │                  │  (53)   │  (cPanel)       │
+└─────────────────┘         └──────────────────┘         └─────────────────┘
+      │                                                          │
+      │                                                          │
+      └──────────────────────────────────────────────────────────┘
+                    dnscluster synczonelocal
+```
+
+**Flow:**
+1. cPanel changes a zone → dnsadmin module syncs to PowerDNS via HTTP API
+2. PowerDNS updates zone → sends NOTIFY to DNS Notify Agent
+3. DNS Notify Agent receives NOTIFY → executes `dnscluster synczonelocal -F <zone>`
+4. Zone is synced back to cPanel
+
+## DNS Notify Agent Setup
+
+After installation, configure and start the DNS Notify Agent:
+
+```bash
+# Edit configuration
+vi /etc/cpanel-dns-agent.conf
+
+# Set bind_ip to your dedicated IP (not 0.0.0.0)
+# bind_ip = 192.168.1.100
+
+# Enable and start service
+systemctl daemon-reload
+systemctl enable dns-notify-agent
+systemctl start dns-notify-agent
+
+# Check status
+systemctl status dns-notify-agent
+tail -f /usr/local/cpanel/logs/dns_notify_agent.log
+```
+
+For detailed DNS Notify Agent documentation, see [dns-agent/README.md](dns-agent/README.md).
 
 ## Version
 

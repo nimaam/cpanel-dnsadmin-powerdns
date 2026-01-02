@@ -1,0 +1,26 @@
+[Unit]
+Description=DNS Notify Agent for cPanel
+Documentation=https://github.com/nimaam/cpanel-dnsadmin-powerdns
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/cpanel/3rdparty/bin/perl /usr/local/cpanel/bin/dns-notify-agent.pl --daemon --config /etc/cpanel-dns-agent.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+PIDFile=/var/run/dns_notify_agent.pid
+
+# Security settings
+User=root
+Group=root
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+# Resource limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+
+
